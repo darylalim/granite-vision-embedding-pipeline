@@ -1,4 +1,7 @@
-docling
-streamlit
-transformers
-torch
+docling==2.66.0
+pyright==1.1.408
+pytest==9.0.2
+ruff==0.15.0
+streamlit==1.52.2
+torch==2.9.1
+transformers==4.57.3
