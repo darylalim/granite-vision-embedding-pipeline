@@ -59,16 +59,17 @@ def embed(
     text: str, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, device: str
 ) -> tuple[list[float], int]:
     """Generate normalized embedding vector and token count from text."""
-    inputs = tokenizer([text], padding=True, truncation=True, return_tensors="pt")
+    inputs = tokenizer(text, padding=True, truncation=True, return_tensors="pt")
     token_count = inputs["input_ids"].shape[1]
-    inputs = {k: v.to(device) for k, v in inputs.items()}
+    inputs = inputs.to(device)
 
-    with torch.no_grad():
+    with torch.inference_mode():
         embedding = model(**inputs)[0][:, 0]
 
-    return torch.nn.functional.normalize(embedding, dim=1).cpu().numpy().tolist()[
-        0
-    ], token_count
+    return (
+        torch.nn.functional.normalize(embedding, dim=1).squeeze(0).tolist(),
+        token_count,
+    )
 
 
 def build_pipeline_options(
@@ -176,11 +177,10 @@ if st.button("Embed", type="primary"):
 
             # Convert PDF to markdown
             with st.spinner("Converting document..."):
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".pdf"
-                ) as tmp_file:
-                    tmp_file.write(uploaded_file.read())
-                    tmp_file_path = tmp_file.name
+                tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+                tmp_file.write(uploaded_file.read())
+                tmp_file.close()
+                tmp_file_path = tmp_file.name
                 doc_markdown = convert(tmp_file_path, doc_converter)
 
             if not doc_markdown.strip():
