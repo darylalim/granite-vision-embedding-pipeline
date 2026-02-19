@@ -1,5 +1,24 @@
+[project]
+name = "embedding-pipeline"
+version = "0.1.0"
+description = "Streamlit web app for converting PDF documents to Markdown and generating vector embeddings using IBM Granite Embedding models."
+requires-python = ">=3.12"
+dependencies = [
+    "docling==2.66.0",
+    "streamlit==1.52.2",
+    "torch==2.9.1",
+    "transformers==4.57.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.0.2",
+    "ruff==0.15.0",
+    "ty==0.0.17",
+]
+
 [tool.ruff.lint.isort]
 combine-as-imports = true
 
-[tool.pyright]
-pythonVersion = "3.12"
+[tool.ty.environment]
+python-version = "3.12"
