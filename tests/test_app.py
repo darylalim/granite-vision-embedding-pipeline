@@ -1,10 +1,15 @@
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import torch
 from docling.datamodel.accelerator_options import AcceleratorDevice
 from docling.datamodel.pipeline_options import TableFormerMode
+from docling.document_converter import DocumentConverter
+from transformers import BatchEncoding
 
-from streamlit_app import build_pipeline_options, embed, get_device
+from streamlit_app import build_pipeline_options, convert, embed, get_device
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 
 class TestGetDevice:
@@ -94,16 +99,26 @@ class TestBuildPipelineOptions:
         assert opts.do_picture_classification is True
 
 
+class TestConvert:
+    def test_converts_pdf_to_markdown(self) -> None:
+        doc_converter = DocumentConverter()
+        md = convert(str(FIXTURE_DIR / "test.pdf"), doc_converter)
+        assert "test PDF document" in md
+        assert "embedding pipeline" in md
+
+
 class TestEmbed:
     def test_returns_normalized_vector_and_token_count(self) -> None:
         embedding_dim = 128
         seq_len = 5
 
         mock_tokenizer = MagicMock()
-        mock_tokenizer.return_value = {
-            "input_ids": torch.ones(1, seq_len, dtype=torch.long),
-            "attention_mask": torch.ones(1, seq_len, dtype=torch.long),
-        }
+        mock_tokenizer.return_value = BatchEncoding(
+            {
+                "input_ids": torch.ones(1, seq_len, dtype=torch.long),
+                "attention_mask": torch.ones(1, seq_len, dtype=torch.long),
+            }
+        )
 
         hidden_states = torch.randn(1, seq_len, embedding_dim)
         mock_model = MagicMock()
@@ -115,3 +130,37 @@ class TestEmbed:
         assert len(vector) == embedding_dim
         norm = sum(x**2 for x in vector) ** 0.5
         assert abs(norm - 1.0) < 1e-5
+
+    def test_tokenizer_receives_plain_string(self) -> None:
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.return_value = BatchEncoding(
+            {
+                "input_ids": torch.ones(1, 3, dtype=torch.long),
+                "attention_mask": torch.ones(1, 3, dtype=torch.long),
+            }
+        )
+
+        mock_model = MagicMock()
+        mock_model.return_value = (torch.randn(1, 3, 64),)
+
+        embed("hello world", mock_model, mock_tokenizer, "cpu")
+
+        args, kwargs = mock_tokenizer.call_args
+        assert args == ("hello world",)
+        assert kwargs == {"padding": True, "truncation": True, "return_tensors": "pt"}
+
+    def test_moves_inputs_to_device(self) -> None:
+        batch = BatchEncoding(
+            {
+                "input_ids": torch.ones(1, 3, dtype=torch.long),
+                "attention_mask": torch.ones(1, 3, dtype=torch.long),
+            }
+        )
+        mock_tokenizer = MagicMock(return_value=batch)
+
+        mock_model = MagicMock()
+        mock_model.return_value = (torch.randn(1, 3, 64),)
+
+        with patch.object(BatchEncoding, "to", return_value=batch) as mock_to:
+            embed("text", mock_model, mock_tokenizer, "cpu")
+            mock_to.assert_called_once_with("cpu")
