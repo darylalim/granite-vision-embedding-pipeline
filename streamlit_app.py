@@ -42,7 +42,7 @@ def render_pages(source: str) -> list[Image.Image]:
     pages = []
     for page in doc:
         pix = page.get_pixmap()
-        pages.append(Image.frombytes("RGB", [pix.width, pix.height], pix.samples))
+        pages.append(Image.frombytes("RGB", (pix.width, pix.height), pix.samples))
     doc.close()
     return pages
 
