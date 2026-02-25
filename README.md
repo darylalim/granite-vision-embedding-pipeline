@@ -1,14 +1,13 @@
 # Embedding Pipeline
 
-Streamlit web app for converting PDF documents to Markdown and generating vector embeddings using IBM's [Granite Embedding](https://huggingface.co/collections/ibm-granite/granite-embedding-models) models.
+Streamlit web app for generating vector embeddings from PDF documents using Nomic's [Embed Multimodal](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b) model.
 
 ## Features
 
-- PDF to Markdown conversion via [Docling](https://github.com/docling-ai/docling)
-  - Configurable table extraction, code/formula understanding, and picture classification
-- Vector embedding generation with [Granite Embedding English R2](https://huggingface.co/ibm-granite/granite-embedding-english-r2) or [Granite Embedding Small English R2](https://huggingface.co/ibm-granite/granite-embedding-small-english-r2)
+- PDF page rendering via [PyMuPDF](https://pymupdf.readthedocs.io/)
+- Multi-vector embeddings with [Nomic Embed Multimodal 3B](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b)
 - Automatic device selection (MPS > CUDA > CPU)
-- Downloadable JSON output with embeddings, timing, and token count
+- Downloadable JSON output with per-page embeddings and timing
 
 ## Setup
 

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Streamlit web app for converting PDF documents to Markdown and generating vector embeddings using IBM's [Granite Embedding](https://huggingface.co/collections/ibm-granite/granite-embedding-models) models.
+Streamlit web app for generating vector embeddings from PDF documents using Nomic's [Embed Multimodal](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b) model.
 
 ## Setup
 
@@ -26,9 +26,9 @@ uv run streamlit run streamlit_app.py
 
 ## Dependencies
 
-- `docling` — PDF document processing and conversion
-- `transformers` — Hugging Face model loading
-- `torch` — tensor operations and normalization
+- `colpali-engine` — multimodal embedding model (`BiQwen2_5`, `BiQwen2_5_Processor`)
+- `pymupdf` — PDF page rendering
+- `torch` — tensor operations
 - `streamlit` — web user interface
 - `ruff` — linting/formatting (dev)
 - `ty` — type checking (dev)
@@ -44,44 +44,33 @@ uv run streamlit run streamlit_app.py
 
 `streamlit_app.py` — single-file app
 
-### PDF Pipeline Options
+### Embedding Model
 
-Selected via `st.radio`:
+[Nomic Embed Multimodal 3B](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b) — multi-vector vision-language embedding model
 
-- TableFormer mode (Accurate/Fast)
+### Pipeline
 
-Selected via `st.toggle`:
-
-- Structure prediction for table cells
-- Code understanding
-- Formula understanding
-- Picture classification
-
-### Embedding Models
-
-Selected via `st.radio`:
-
-- [Granite Embedding English R2](https://huggingface.co/ibm-granite/granite-embedding-english-r2)
-- [Granite Embedding Small English R2](https://huggingface.co/ibm-granite/granite-embedding-small-english-r2)
+PDF upload → render pages as images (`pymupdf`) → embed images (`BiQwen2_5`) → download JSON
 
 ### Performance
 
 - Best available device: MPS > CUDA > CPU
-- `@st.cache_resource` to cache models
+- `@st.cache_resource` to cache model and processor
 - `torch.inference_mode()` for inference
-- `BatchEncoding.to(device)` for device transfer
+- `torch.bfloat16` for model precision
 - `time.perf_counter_ns()` for timing (nanoseconds)
 
 ### Constants
 
+- `MODEL_ID = "nomic-ai/nomic-embed-multimodal-3b"`
 - `MAX_PDF_PAGES = 100`
 - `MAX_FILE_SIZE_BYTES = 20_971_520` (20 MB)
-- `NUM_DOCLING_THREADS = 8`
 
 ### Error Handling
 
 - `OSError`, `RuntimeError`, `ValueError` caught with `st.error()`
-- Empty markdown from PDF conversion raises `ValueError`
+- Empty or malformed PDFs raise `ValueError`
+- File size and page count limits enforced
 - Unexpected exceptions shown with `st.exception()`
 
 ### JSON Download
@@ -89,9 +78,9 @@ Selected via `st.radio`:
 Fields in the downloadable JSON via `st.download_button`:
 
 - `model` (string) — model that produced the embeddings
-- `embeddings` (number[][]) — array of vector embeddings
+- `embeddings` (number[][][]) — per-page multi-vector embeddings (page → patches → 128-dim vectors)
 - `total_duration` (integer) — total duration in nanoseconds
-- `prompt_eval_count` (integer) — number of input tokens processed
+- `page_count` (integer) — number of PDF pages processed
 
 ### Metrics
 
@@ -99,10 +88,10 @@ Fields in the downloadable JSON via `st.download_button`:
 
 ## Tests
 
-- `tests/test_app.py` — unit tests for `get_device`, `build_pipeline_options`, `convert`, and `embed`
-- `tests/fixtures/test.pdf` — minimal PDF fixture for `convert` tests
+- `tests/test_app.py` — unit tests for `get_device`, `render_pages`, and `embed`
+- `tests/fixtures/test.pdf` — minimal PDF fixture for `render_pages` tests
 
 ## Resources
 
-- [Repository](https://github.com/ibm-granite/granite-embedding-models)
-- [Paper](https://arxiv.org/abs/2508.21085)
+- [Model Card](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b)
+- [ColPali Engine](https://github.com/illuin-tech/colpali)
