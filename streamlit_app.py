@@ -64,7 +64,7 @@ def search(
         query_embedding = model(**batch)
     scores = processor.score(
         qs=[query_embedding[0]],
-        ps=[emb for emb in image_embeddings],
+        ps=list(image_embeddings),
     )
     ranked = sorted(
         [(i, score.item()) for i, score in enumerate(scores[0])],
