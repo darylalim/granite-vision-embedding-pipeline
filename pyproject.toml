@@ -1,13 +1,13 @@
 [project]
 name = "embedding-pipeline"
 version = "0.1.0"
-description = "Streamlit web app for converting PDF documents to Markdown and generating vector embeddings using IBM Granite Embedding models."
+description = "Streamlit web app for generating vector embeddings from PDF documents using Nomic's multimodal embedding model."
 requires-python = ">=3.12"
 dependencies = [
-    "docling==2.66.0",
+    "colpali-engine>=0.3.3",
+    "pymupdf>=1.25.0",
     "streamlit==1.52.2",
     "torch==2.9.1",
-    "transformers==4.57.3",
 ]
 
 [dependency-groups]
