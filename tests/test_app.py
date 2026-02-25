@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 from PIL import Image
+
 from streamlit_app import embed, get_device, render_pages
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -26,6 +27,20 @@ class TestGetDevice:
         mock_torch.backends.mps.is_available.return_value = False
         mock_torch.cuda.is_available.return_value = False
         assert get_device() == "cpu"
+
+
+class TestRenderPages:
+    def test_renders_fixture_pdf(self) -> None:
+        pages = render_pages(str(FIXTURE_DIR / "test.pdf"))
+        assert len(pages) >= 1
+        assert all(isinstance(p, Image.Image) for p in pages)
+        assert all(p.mode == "RGB" for p in pages)
+
+    def test_returns_empty_for_no_pages(self, tmp_path: Path) -> None:
+        empty_pdf = tmp_path / "empty.pdf"
+        empty_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+        pages = render_pages(str(empty_pdf))
+        assert pages == []
 
 
 class TestEmbed:
@@ -65,17 +80,3 @@ class TestEmbed:
 
         mock_processor.process_images.assert_called_once_with(images)
         mock_batch.to.assert_called_once_with("cpu")
-
-
-class TestRenderPages:
-    def test_renders_fixture_pdf(self) -> None:
-        pages = render_pages(str(FIXTURE_DIR / "test.pdf"))
-        assert len(pages) >= 1
-        assert all(isinstance(p, Image.Image) for p in pages)
-        assert all(p.mode == "RGB" for p in pages)
-
-    def test_returns_empty_for_no_pages(self, tmp_path: Path) -> None:
-        empty_pdf = tmp_path / "empty.pdf"
-        empty_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
-        pages = render_pages(str(empty_pdf))
-        assert pages == []
