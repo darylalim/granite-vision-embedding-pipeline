@@ -1,11 +1,12 @@
 # Embedding Pipeline
 
-Streamlit web app for generating vector embeddings from PDF documents using Nomic's [Embed Multimodal](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b) model.
+Streamlit web app for generating vector embeddings from PDF documents and searching over them using Nomic's [Embed Multimodal](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b) model.
 
 ## Features
 
 - PDF page rendering via [PyMuPDF](https://pymupdf.readthedocs.io/)
 - Multi-vector embeddings with [Nomic Embed Multimodal 3B](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b)
+- Text query search over embedded pages ranked by relevance
 - Automatic device selection (MPS > CUDA > CPU)
 - Downloadable JSON output with per-page embeddings and timing
 

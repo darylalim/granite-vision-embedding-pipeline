@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Streamlit web app for generating vector embeddings from PDF documents using Nomic's [Embed Multimodal](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b) model.
+Streamlit web app for generating vector embeddings from PDF documents and searching over them using Nomic's [Embed Multimodal](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b) model.
 
 ## Setup
 
@@ -50,7 +50,7 @@ uv run streamlit run streamlit_app.py
 
 ### Pipeline
 
-PDF upload → render pages as images (`pymupdf`) → embed images (`BiQwen2_5`) → download JSON
+PDF upload → render pages as images (`pymupdf`) → embed images (`BiQwen2_5`) → download JSON / search pages by text query
 
 ### Performance
 
@@ -63,14 +63,11 @@ PDF upload → render pages as images (`pymupdf`) → embed images (`BiQwen2_5`)
 ### Constants
 
 - `MODEL_ID = "nomic-ai/nomic-embed-multimodal-3b"`
-- `MAX_PDF_PAGES = 100`
-- `MAX_FILE_SIZE_BYTES = 20_971_520` (20 MB)
 
 ### Error Handling
 
 - `OSError`, `RuntimeError`, `ValueError` caught with `st.error()`
 - Empty or malformed PDFs raise `ValueError`
-- File size and page count limits enforced
 - Unexpected exceptions shown with `st.exception()`
 
 ### JSON Download
@@ -82,13 +79,17 @@ Fields in the downloadable JSON via `st.download_button`:
 - `total_duration` (integer) — total duration in nanoseconds
 - `page_count` (integer) — number of PDF pages processed
 
+### Search
+
+Text query input scores against page embeddings via `processor.score()` and displays pages ranked by relevance. Results persist across Streamlit reruns via `st.session_state`.
+
 ### Metrics
 
-`st.metric` displays all JSON fields except `embeddings`.
+`st.metric` displays model, duration (seconds), and page count.
 
 ## Tests
 
-- `tests/test_app.py` — unit tests for `get_device`, `render_pages`, and `embed`
+- `tests/test_app.py` — unit tests for `get_device`, `render_pages`, `embed`, and `search`
 - `tests/fixtures/test.pdf` — minimal PDF fixture for `render_pages` tests
 
 ## Resources
