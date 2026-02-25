@@ -3,8 +3,9 @@ from unittest.mock import MagicMock, patch
 
 import torch
 from PIL import Image
+from pytest import approx
 
-from streamlit_app import embed, get_device, render_pages
+from streamlit_app import embed, get_device, render_pages, search
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
@@ -31,15 +32,14 @@ class TestGetDevice:
 
 class TestRenderPages:
     def test_renders_fixture_pdf(self) -> None:
-        pages = render_pages(str(FIXTURE_DIR / "test.pdf"))
+        data = (FIXTURE_DIR / "test.pdf").read_bytes()
+        pages = render_pages(data)
         assert len(pages) >= 1
         assert all(isinstance(p, Image.Image) for p in pages)
         assert all(p.mode == "RGB" for p in pages)
 
-    def test_returns_empty_for_no_pages(self, tmp_path: Path) -> None:
-        empty_pdf = tmp_path / "empty.pdf"
-        empty_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
-        pages = render_pages(str(empty_pdf))
+    def test_returns_empty_for_no_pages(self) -> None:
+        pages = render_pages(b"%PDF-1.4\n%%EOF\n")
         assert pages == []
 
 
@@ -61,9 +61,8 @@ class TestEmbed:
         images = [Image.new("RGB", (64, 64)) for _ in range(num_pages)]
         embeddings = embed(images, mock_model, mock_processor)
 
-        assert len(embeddings) == num_pages
-        assert all(len(page) == num_patches for page in embeddings)
-        assert all(len(vec) == embedding_dim for page in embeddings for vec in page)
+        assert isinstance(embeddings, torch.Tensor)
+        assert embeddings.shape == (num_pages, num_patches, embedding_dim)
 
     def test_calls_process_images(self) -> None:
         mock_processor = MagicMock()
@@ -80,3 +79,29 @@ class TestEmbed:
 
         mock_processor.process_images.assert_called_once_with(images)
         mock_batch.to.assert_called_once_with("cpu")
+
+
+class TestSearch:
+    def test_returns_ranked_results(self) -> None:
+        mock_processor = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.to.return_value = mock_batch
+        mock_processor.process_texts.return_value = mock_batch
+
+        query_embedding = torch.tensor([[0.1, 0.2, 0.3]])
+        mock_model = MagicMock()
+        mock_model.device = "cpu"
+        mock_model.return_value = query_embedding
+
+        scores = torch.tensor([[0.5, 0.9, 0.2]])
+        mock_processor.score.return_value = scores
+
+        image_embeddings = torch.randn(3, 128)
+
+        results = search("test query", mock_model, mock_processor, image_embeddings)
+
+        assert len(results) == 3
+        assert results[0] == (1, approx(0.9))
+        assert results[1] == (0, approx(0.5))
+        assert results[2] == (2, approx(0.2))
+        mock_processor.process_texts.assert_called_once_with(["test query"])

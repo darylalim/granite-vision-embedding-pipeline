@@ -1,7 +1,5 @@
 import json
-import tempfile
 import time
-from pathlib import Path
 
 import fitz
 import streamlit as st
@@ -10,8 +8,6 @@ from colpali_engine.models import BiQwen2_5, BiQwen2_5_Processor
 from PIL import Image
 
 MODEL_ID = "nomic-ai/nomic-embed-multimodal-3b"
-MAX_PDF_PAGES = 100
-MAX_FILE_SIZE_BYTES = 20_971_520  # 20MB
 
 
 def get_device() -> str:
@@ -33,31 +29,53 @@ def load_model(device: str) -> tuple[BiQwen2_5, BiQwen2_5_Processor]:
     return model, processor
 
 
-def render_pages(source: str) -> list[Image.Image]:
+def render_pages(data: bytes) -> list[Image.Image]:
     """Render PDF pages as PIL Images."""
     try:
-        doc = fitz.open(source)
+        with fitz.open(stream=data, filetype="pdf") as doc:
+            return [
+                Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                for page in doc
+                for pix in [page.get_pixmap()]
+            ]
     except (fitz.FileDataError, fitz.EmptyFileError):
         return []
-    pages = []
-    for page in doc:
-        pix = page.get_pixmap()
-        pages.append(Image.frombytes("RGB", (pix.width, pix.height), pix.samples))
-    doc.close()
-    return pages
 
 
 def embed(
     images: list[Image.Image], model: BiQwen2_5, processor: BiQwen2_5_Processor
-) -> list[list[list[float]]]:
+) -> torch.Tensor:
     """Generate per-page multi-vector embeddings from images."""
     batch = processor.process_images(images).to(model.device)
     with torch.inference_mode():
         embeddings = model(**batch)
-    return embeddings.tolist()
+    return embeddings
+
+
+def search(
+    query: str,
+    model: BiQwen2_5,
+    processor: BiQwen2_5_Processor,
+    image_embeddings: torch.Tensor,
+) -> list[tuple[int, float]]:
+    """Score a text query against image embeddings and return ranked results."""
+    batch = processor.process_texts([query]).to(model.device)
+    with torch.inference_mode():
+        query_embedding = model(**batch)
+    scores = processor.score(
+        qs=[query_embedding[0]],
+        ps=[emb for emb in image_embeddings],
+    )
+    ranked = sorted(
+        [(i, score.item()) for i, score in enumerate(scores[0])],
+        key=lambda x: x[1],
+        reverse=True,
+    )
+    return ranked
 
 
 # UI
+st.set_page_config(page_title="Embedding Pipeline", layout="centered")
 st.title("Embedding Pipeline")
 st.write("Generate vector embeddings from PDF documents with Nomic Embed Multimodal.")
 
@@ -65,78 +83,96 @@ uploaded_file = st.file_uploader("Upload file", type=["pdf"])
 
 device = get_device()
 
-if st.button("Embed", type="primary"):
-    if uploaded_file is None:
-        st.warning("Upload a PDF file.")
-    else:
-        tmp_file_path = None
+if uploaded_file:
+    size_mb = len(uploaded_file.getvalue()) / 1_048_576
+    st.caption(f"{uploaded_file.name} · {size_mb:.1f} MB")
+
+    if st.button("Embed", type="primary"):
         try:
             total_start = time.perf_counter_ns()
 
+            progress = st.progress(0.0, text="Loading model...")
+
             # Load model
-            with st.spinner(f"Loading model on {device.upper()}..."):
-                model, processor = load_model(device)
+            model, processor = load_model(device)
 
             # Render PDF pages as images
-            with st.spinner("Rendering pages..."):
-                tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-                tmp_file.write(uploaded_file.read())
-                tmp_file.close()
-                tmp_file_path = tmp_file.name
-
-                file_size = Path(tmp_file_path).stat().st_size
-                if file_size > MAX_FILE_SIZE_BYTES:
-                    raise ValueError(
-                        f"File size ({file_size:,} bytes) exceeds limit ({MAX_FILE_SIZE_BYTES:,} bytes)."
-                    )
-
-                pages = render_pages(tmp_file_path)
+            progress.progress(0.33, text="Rendering pages...")
+            pages = render_pages(uploaded_file.read())
 
             if not pages:
                 raise ValueError("PDF contains no pages to embed.")
 
-            if len(pages) > MAX_PDF_PAGES:
-                raise ValueError(
-                    f"Page count ({len(pages)}) exceeds limit ({MAX_PDF_PAGES})."
-                )
-
             # Generate embeddings
-            with st.spinner("Generating embeddings..."):
-                page_embeddings = embed(pages, model, processor)
+            progress.progress(0.66, text="Generating embeddings...")
+            page_embeddings = embed(pages, model, processor)
 
             total_duration = time.perf_counter_ns() - total_start
 
-            # Display results
-            st.success("Done.")
+            progress.progress(1.0, text="Complete.")
+            progress.empty()
 
-            st.subheader("Metrics")
-            st.metric("Model", MODEL_ID)
-            col1, col2 = st.columns(2)
-            col1.metric("Total Duration (ns)", f"{total_duration:,}")
-            col2.metric("Page Count", len(pages))
+            # Store results in session state
+            st.session_state.pages = pages
+            st.session_state.page_embeddings = page_embeddings
+            st.session_state.total_duration = total_duration
+            st.session_state.file_stem = uploaded_file.name.rsplit(".", 1)[0]
+            st.session_state.pop("search_results", None)
 
-            embedding_data = {
-                "model": MODEL_ID,
-                "embeddings": page_embeddings,
-                "total_duration": total_duration,
-                "page_count": len(pages),
-            }
-            st.download_button(
-                label="Download JSON",
-                data=json.dumps(embedding_data),
-                file_name="embedding.json",
-                mime="application/json",
-            )
-
-        except OSError as e:
-            st.error(f"File error: {e}")
-        except RuntimeError as e:
-            st.error(f"Model error: {e}")
-        except ValueError as e:
-            st.error(f"Processing error: {e}")
+        except (OSError, RuntimeError, ValueError) as e:
+            st.error(str(e))
         except Exception as e:
             st.exception(e)
 
-        finally:
-            if tmp_file_path:
-                Path(tmp_file_path).unlink(missing_ok=True)
+    if "pages" in st.session_state:
+        pages = st.session_state.pages
+        page_embeddings = st.session_state.page_embeddings
+        total_duration = st.session_state.total_duration
+        file_stem = st.session_state.file_stem
+
+        st.success("Done.")
+
+        with st.expander(f"Page previews ({len(pages)})"):
+            cols = st.columns(min(len(pages), 4))
+            for i, page in enumerate(pages):
+                cols[i % 4].image(page, caption=f"Page {i + 1}", width="stretch")
+
+        st.subheader("Metrics")
+        st.metric("Model", MODEL_ID)
+        col1, col2 = st.columns(2)
+        duration_s = total_duration / 1_000_000_000
+        col1.metric("Duration", f"{duration_s:.2f} s")
+        col2.metric("Page Count", len(pages))
+
+        embedding_data = {
+            "model": MODEL_ID,
+            "embeddings": page_embeddings.tolist(),
+            "total_duration": total_duration,
+            "page_count": len(pages),
+        }
+        st.download_button(
+            label="Download JSON",
+            data=json.dumps(embedding_data),
+            file_name=f"{file_stem}_embedding.json",
+            mime="application/json",
+        )
+
+        st.subheader("Search")
+        query = st.text_input("Text query")
+        if st.button("Search") and query:
+            model, processor = load_model(device)
+            st.session_state.search_results = search(
+                query, model, processor, page_embeddings
+            )
+
+        if "search_results" in st.session_state:
+            results = st.session_state.search_results
+            cols = st.columns(min(len(results), 4))
+            for rank, (page_idx, score) in enumerate(results):
+                cols[rank % 4].image(
+                    pages[page_idx],
+                    caption=f"Page {page_idx + 1} · {score:.4f}",
+                    width="stretch",
+                )
+
+st.caption(f"Device: {device.upper()}")
