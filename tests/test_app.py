@@ -42,6 +42,10 @@ class TestRenderPages:
         pages = render_pages(b"%PDF-1.4\n%%EOF\n")
         assert pages == []
 
+    def test_returns_empty_for_invalid_data(self) -> None:
+        pages = render_pages(b"not a pdf")
+        assert pages == []
+
 
 class TestEmbed:
     def test_returns_per_page_embeddings(self) -> None:
@@ -105,3 +109,25 @@ class TestSearch:
         assert results[1] == (0, approx(0.5))
         assert results[2] == (2, approx(0.2))
         mock_processor.process_texts.assert_called_once_with(["test query"])
+
+    def test_calls_process_texts_and_score(self) -> None:
+        mock_processor = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.to.return_value = mock_batch
+        mock_processor.process_texts.return_value = mock_batch
+
+        query_embedding = torch.tensor([[0.1, 0.2, 0.3]])
+        mock_model = MagicMock()
+        mock_model.device = "cpu"
+        mock_model.return_value = query_embedding
+
+        scores = torch.tensor([[0.5, 0.9]])
+        mock_processor.score.return_value = scores
+
+        image_embeddings = torch.randn(2, 128)
+
+        search("find charts", mock_model, mock_processor, image_embeddings)
+
+        mock_processor.process_texts.assert_called_once_with(["find charts"])
+        mock_batch.to.assert_called_once_with("cpu")
+        mock_processor.score.assert_called_once()
