@@ -172,11 +172,19 @@ if uploaded_file:
 
         st.subheader("Search")
         query = st.text_input("Text query")
-        if st.button("Search") and query:
-            model, processor = load_model(device)
-            st.session_state.search_results = search(
-                query, model, processor, page_embeddings
-            )
+        if st.button("Search"):
+            if not query:
+                st.warning("Enter a search query.")
+            else:
+                try:
+                    model, processor = load_model(device)
+                    st.session_state.search_results = search(
+                        query, model, processor, page_embeddings
+                    )
+                except (OSError, RuntimeError, ValueError) as e:
+                    st.error(str(e))
+                except Exception as e:
+                    st.exception(e)
 
         if "search_results" in st.session_state:
             results = st.session_state.search_results
