@@ -87,6 +87,18 @@ if uploaded_file:
     size_mb = len(uploaded_file.getvalue()) / 1_048_576
     st.caption(f"{uploaded_file.name} · {size_mb:.1f} MB")
 
+    # Clear stale results if a different file was uploaded
+    if st.session_state.get("file_id") != uploaded_file.file_id:
+        for key in (
+            "pages",
+            "page_embeddings",
+            "total_duration",
+            "file_stem",
+            "search_results",
+            "file_id",
+        ):
+            st.session_state.pop(key, None)
+
     if st.button("Embed", type="primary"):
         try:
             total_start = time.perf_counter_ns()
@@ -113,6 +125,7 @@ if uploaded_file:
             progress.empty()
 
             # Store results in session state
+            st.session_state.file_id = uploaded_file.file_id
             st.session_state.pages = pages
             st.session_state.page_embeddings = page_embeddings
             st.session_state.total_duration = total_duration
