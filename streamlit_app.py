@@ -15,6 +15,7 @@ try:
     from docling.document_converter import DocumentConverter, PdfFormatOption
 except ModuleNotFoundError:
     pass
+from colpali_engine.models import BiQwen2_5, BiQwen2_5_Processor
 from PIL import Image
 from transformers import (
     AutoModel,
@@ -77,20 +78,13 @@ def render_pages(source: str) -> list[Image.Image]:
 
 
 def embed(
-    text: str, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, device: str
-) -> tuple[list[float], int]:
-    """Generate normalized embedding vector and token count from text."""
-    inputs = tokenizer(text, padding=True, truncation=True, return_tensors="pt")
-    token_count = inputs["input_ids"].shape[1]
-    inputs = inputs.to(device)
-
+    images: list[Image.Image], model: BiQwen2_5, processor: BiQwen2_5_Processor
+) -> list[list[list[float]]]:
+    """Generate per-page multi-vector embeddings from images."""
+    batch = processor.process_images(images).to(model.device)
     with torch.inference_mode():
-        embedding = model(**inputs)[0][:, 0]
-
-    return (
-        torch.nn.functional.normalize(embedding, dim=1).squeeze(0).tolist(),
-        token_count,
-    )
+        embeddings = model(**batch)
+    return embeddings.tolist()
 
 
 def build_pipeline_options(

@@ -9,8 +9,6 @@ try:
 except ModuleNotFoundError:
     pass
 from PIL import Image
-from transformers import BatchEncoding
-
 from streamlit_app import build_pipeline_options, convert, embed, get_device, render_pages
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -112,62 +110,42 @@ class TestConvert:
 
 
 class TestEmbed:
-    def test_returns_normalized_vector_and_token_count(self) -> None:
+    def test_returns_per_page_embeddings(self) -> None:
+        num_pages = 2
+        num_patches = 4
         embedding_dim = 128
-        seq_len = 5
 
-        mock_tokenizer = MagicMock()
-        mock_tokenizer.return_value = BatchEncoding(
-            {
-                "input_ids": torch.ones(1, seq_len, dtype=torch.long),
-                "attention_mask": torch.ones(1, seq_len, dtype=torch.long),
-            }
-        )
-
-        hidden_states = torch.randn(1, seq_len, embedding_dim)
-        mock_model = MagicMock()
-        mock_model.return_value = (hidden_states,)
-
-        vector, count = embed("test text", mock_model, mock_tokenizer, "cpu")
-
-        assert count == seq_len
-        assert len(vector) == embedding_dim
-        norm = sum(x**2 for x in vector) ** 0.5
-        assert abs(norm - 1.0) < 1e-5
-
-    def test_tokenizer_receives_plain_string(self) -> None:
-        mock_tokenizer = MagicMock()
-        mock_tokenizer.return_value = BatchEncoding(
-            {
-                "input_ids": torch.ones(1, 3, dtype=torch.long),
-                "attention_mask": torch.ones(1, 3, dtype=torch.long),
-            }
-        )
+        mock_processor = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.to.return_value = mock_batch
+        mock_processor.process_images.return_value = mock_batch
 
         mock_model = MagicMock()
-        mock_model.return_value = (torch.randn(1, 3, 64),)
+        mock_model.device = "cpu"
+        mock_model.return_value = torch.randn(num_pages, num_patches, embedding_dim)
 
-        embed("hello world", mock_model, mock_tokenizer, "cpu")
+        images = [Image.new("RGB", (64, 64)) for _ in range(num_pages)]
+        embeddings = embed(images, mock_model, mock_processor)
 
-        args, kwargs = mock_tokenizer.call_args
-        assert args == ("hello world",)
-        assert kwargs == {"padding": True, "truncation": True, "return_tensors": "pt"}
+        assert len(embeddings) == num_pages
+        assert all(len(page) == num_patches for page in embeddings)
+        assert all(len(vec) == embedding_dim for page in embeddings for vec in page)
 
-    def test_moves_inputs_to_device(self) -> None:
-        batch = BatchEncoding(
-            {
-                "input_ids": torch.ones(1, 3, dtype=torch.long),
-                "attention_mask": torch.ones(1, 3, dtype=torch.long),
-            }
-        )
-        mock_tokenizer = MagicMock(return_value=batch)
+    def test_calls_process_images(self) -> None:
+        mock_processor = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.to.return_value = mock_batch
+        mock_processor.process_images.return_value = mock_batch
 
         mock_model = MagicMock()
-        mock_model.return_value = (torch.randn(1, 3, 64),)
+        mock_model.device = "cpu"
+        mock_model.return_value = torch.randn(1, 4, 128)
 
-        with patch.object(BatchEncoding, "to", return_value=batch) as mock_to:
-            embed("text", mock_model, mock_tokenizer, "cpu")
-            mock_to.assert_called_once_with("cpu")
+        images = [Image.new("RGB", (64, 64))]
+        embed(images, mock_model, mock_processor)
+
+        mock_processor.process_images.assert_called_once_with(images)
+        mock_batch.to.assert_called_once_with("cpu")
 
 
 class TestRenderPages:
