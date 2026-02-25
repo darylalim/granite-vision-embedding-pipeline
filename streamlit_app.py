@@ -35,7 +35,10 @@ def load_model(device: str) -> tuple[BiQwen2_5, BiQwen2_5_Processor]:
 
 def render_pages(source: str) -> list[Image.Image]:
     """Render PDF pages as PIL Images."""
-    doc = fitz.open(source)
+    try:
+        doc = fitz.open(source)
+    except (fitz.FileDataError, fitz.EmptyFileError):
+        return []
     pages = []
     for page in doc:
         pix = page.get_pixmap()
@@ -80,10 +83,22 @@ if st.button("Embed", type="primary"):
                 tmp_file.write(uploaded_file.read())
                 tmp_file.close()
                 tmp_file_path = tmp_file.name
+
+                file_size = Path(tmp_file_path).stat().st_size
+                if file_size > MAX_FILE_SIZE_BYTES:
+                    raise ValueError(
+                        f"File size ({file_size:,} bytes) exceeds limit ({MAX_FILE_SIZE_BYTES:,} bytes)."
+                    )
+
                 pages = render_pages(tmp_file_path)
 
             if not pages:
                 raise ValueError("PDF contains no pages to embed.")
+
+            if len(pages) > MAX_PDF_PAGES:
+                raise ValueError(
+                    f"Page count ({len(pages)}) exceeds limit ({MAX_PDF_PAGES})."
+                )
 
             # Generate embeddings
             with st.spinner("Generating embeddings..."):
