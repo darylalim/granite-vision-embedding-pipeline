@@ -2,14 +2,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import torch
-try:
-    from docling.datamodel.accelerator_options import AcceleratorDevice
-    from docling.datamodel.pipeline_options import TableFormerMode
-    from docling.document_converter import DocumentConverter
-except ModuleNotFoundError:
-    pass
 from PIL import Image
-from streamlit_app import build_pipeline_options, convert, embed, get_device, render_pages
+from streamlit_app import embed, get_device, render_pages
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
@@ -19,94 +13,19 @@ class TestGetDevice:
     def test_prefers_mps(self, mock_torch: MagicMock) -> None:
         mock_torch.backends.mps.is_available.return_value = True
         mock_torch.cuda.is_available.return_value = True
-        device, accel = get_device()
-        assert device == "mps"
-        assert accel == AcceleratorDevice.MPS
+        assert get_device() == "mps"
 
     @patch("streamlit_app.torch")
     def test_falls_back_to_cuda(self, mock_torch: MagicMock) -> None:
         mock_torch.backends.mps.is_available.return_value = False
         mock_torch.cuda.is_available.return_value = True
-        device, accel = get_device()
-        assert device == "cuda"
-        assert accel == AcceleratorDevice.CUDA
+        assert get_device() == "cuda"
 
     @patch("streamlit_app.torch")
     def test_falls_back_to_cpu(self, mock_torch: MagicMock) -> None:
         mock_torch.backends.mps.is_available.return_value = False
         mock_torch.cuda.is_available.return_value = False
-        device, accel = get_device()
-        assert device == "cpu"
-        assert accel == AcceleratorDevice.CPU
-
-
-class TestBuildPipelineOptions:
-    def test_accurate_mode(self) -> None:
-        opts = build_pipeline_options(
-            tableformer_mode="Accurate",
-            use_structure_prediction=False,
-            code_understanding=False,
-            formula_understanding=False,
-            picture_classification=False,
-            accelerator_device=AcceleratorDevice.CPU,
-        )
-        assert opts.table_structure_options.mode == TableFormerMode.ACCURATE
-        assert opts.table_structure_options.do_cell_matching is True
-
-    def test_fast_mode(self) -> None:
-        opts = build_pipeline_options(
-            tableformer_mode="Fast",
-            use_structure_prediction=False,
-            code_understanding=False,
-            formula_understanding=False,
-            picture_classification=False,
-            accelerator_device=AcceleratorDevice.CPU,
-        )
-        assert opts.table_structure_options.mode == TableFormerMode.FAST
-
-    def test_structure_prediction_disables_cell_matching(self) -> None:
-        opts = build_pipeline_options(
-            tableformer_mode="Accurate",
-            use_structure_prediction=True,
-            code_understanding=False,
-            formula_understanding=False,
-            picture_classification=False,
-            accelerator_device=AcceleratorDevice.CPU,
-        )
-        assert opts.table_structure_options.do_cell_matching is False
-
-    def test_enrichment_flags(self) -> None:
-        opts = build_pipeline_options(
-            tableformer_mode="Accurate",
-            use_structure_prediction=False,
-            code_understanding=True,
-            formula_understanding=True,
-            picture_classification=False,
-            accelerator_device=AcceleratorDevice.CPU,
-        )
-        assert opts.do_code_enrichment is True
-        assert opts.do_formula_enrichment is True
-
-    def test_picture_classification(self) -> None:
-        opts = build_pipeline_options(
-            tableformer_mode="Accurate",
-            use_structure_prediction=False,
-            code_understanding=False,
-            formula_understanding=False,
-            picture_classification=True,
-            accelerator_device=AcceleratorDevice.CPU,
-        )
-        assert opts.generate_picture_images is True
-        assert opts.images_scale == 2
-        assert opts.do_picture_classification is True
-
-
-class TestConvert:
-    def test_converts_pdf_to_markdown(self) -> None:
-        doc_converter = DocumentConverter()
-        md = convert(str(FIXTURE_DIR / "test.pdf"), doc_converter)
-        assert "test PDF document" in md
-        assert "embedding pipeline" in md
+        assert get_device() == "cpu"
 
 
 class TestEmbed:
