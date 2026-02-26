@@ -4,11 +4,11 @@ Streamlit web app for generating vector embeddings from PDF documents and search
 
 ## Features
 
-- PDF page rendering via [PyMuPDF](https://pymupdf.readthedocs.io/)
+- PDF page rendering at configurable DPI (72, 150, 300) via [PyMuPDF](https://pymupdf.readthedocs.io/)
 - Multi-vector embeddings with [Nomic Embed Multimodal 3B](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b)
 - Text query search over embedded pages ranked by relevance
 - Automatic device selection (MPS > CUDA > CPU)
-- Downloadable JSON output with per-page embeddings and timing
+- Downloadable JSON output with per-page embeddings, DPI, and timing
 
 ## Setup
 

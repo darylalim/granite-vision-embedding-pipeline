@@ -59,10 +59,12 @@ PDF upload → render pages as images at configurable DPI (`pymupdf`) → embed 
 - `torch.inference_mode()` for inference
 - `torch.bfloat16` for model precision
 - `time.perf_counter_ns()` for timing (nanoseconds)
+- JSON string pre-computed at embed time to avoid repeated `tolist()` on reruns
 
 ### Constants
 
 - `MODEL_ID = "nomic-ai/nomic-embed-multimodal-3b"`
+- `DPI_OPTIONS = {"Low (72)": 72, "Medium (150)": 150, "High (300)": 300}`
 
 ### Error Handling
 
@@ -70,9 +72,13 @@ PDF upload → render pages as images at configurable DPI (`pymupdf`) → embed 
 - Empty or malformed PDFs raise `ValueError`
 - Unexpected exceptions shown with `st.exception()`
 
+### Session State
+
+Embed results stored in a single `st.session_state.results` dict with keys: `file_id`, `pages`, `page_embeddings`, `total_duration`, `file_stem`, `dpi`, `json`. Cleared on new file upload.
+
 ### JSON Download
 
-Fields in the downloadable JSON via `st.download_button`:
+Pre-computed JSON string cached in `results["json"]` at embed time. Fields in the downloadable JSON via `st.download_button`:
 
 - `model` (string) — model that produced the embeddings
 - `dpi` (integer) — render resolution in dots per inch (72–300)
@@ -82,15 +88,15 @@ Fields in the downloadable JSON via `st.download_button`:
 
 ### Search
 
-Text query input scores against page embeddings via `processor.score()` and displays pages ranked by relevance. Results persist across Streamlit reruns via `st.session_state`.
+Text query input scores against page embeddings via `processor.score()` and displays pages ranked by relevance. Search results persist as a separate `st.session_state.search_results` key, cleared on new file upload or new embed.
 
 ### Metrics
 
-`st.metric` displays model, duration (seconds), and page count.
+`st.metric` displays model, duration (seconds), page count, and DPI.
 
 ## Tests
 
-- `tests/test_app.py` — unit tests for `get_device`, `render_pages`, `embed`, and `search`
+- `tests/test_app.py` — unit tests for `DPI_OPTIONS`, `get_device`, `render_pages`, `embed`, and `search`
 - `tests/fixtures/test.pdf` — minimal PDF fixture for `render_pages` tests
 
 ## Resources
