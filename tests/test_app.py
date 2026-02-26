@@ -16,7 +16,7 @@ from streamlit_app import (
     search_multi,
 )
 
-FIXTURE_DIR = Path(__file__).parent / "fixtures"
+DATA_DIR = Path(__file__).parent / "data" / "pdf"
 
 
 def _make_result(
@@ -71,10 +71,17 @@ class TestGetDevice:
 
 
 class TestRenderPages:
-    def test_renders_fixture_pdf(self) -> None:
-        data = (FIXTURE_DIR / "test.pdf").read_bytes()
+    def test_renders_single_page_pdf(self) -> None:
+        data = (DATA_DIR / "single_page.pdf").read_bytes()
         pages = render_pages(data)
-        assert len(pages) >= 1
+        assert len(pages) == 1
+        assert isinstance(pages[0], Image.Image)
+        assert pages[0].mode == "RGB"
+
+    def test_renders_multi_page_pdf(self) -> None:
+        data = (DATA_DIR / "multi_page.pdf").read_bytes()
+        pages = render_pages(data)
+        assert len(pages) == 3
         assert all(isinstance(p, Image.Image) for p in pages)
         assert all(p.mode == "RGB" for p in pages)
 
@@ -87,14 +94,14 @@ class TestRenderPages:
         assert pages == []
 
     def test_higher_dpi_produces_larger_images(self) -> None:
-        data = (FIXTURE_DIR / "test.pdf").read_bytes()
+        data = (DATA_DIR / "single_page.pdf").read_bytes()
         pages_72 = render_pages(data, dpi=72)
         pages_150 = render_pages(data, dpi=150)
         assert pages_150[0].width > pages_72[0].width
         assert pages_150[0].height > pages_72[0].height
 
     def test_default_dpi_is_150(self) -> None:
-        data = (FIXTURE_DIR / "test.pdf").read_bytes()
+        data = (DATA_DIR / "single_page.pdf").read_bytes()
         pages_default = render_pages(data)
         pages_150 = render_pages(data, dpi=150)
         assert pages_default[0].size == pages_150[0].size
