@@ -5,9 +5,21 @@ import torch
 from PIL import Image
 from pytest import approx
 
-from streamlit_app import embed, get_device, render_pages, search
+from streamlit_app import DPI_OPTIONS, embed, get_device, render_pages, search
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
+
+class TestDpiOptions:
+    def test_contains_three_options(self) -> None:
+        assert len(DPI_OPTIONS) == 3
+
+    def test_values_are_72_150_300(self) -> None:
+        assert sorted(DPI_OPTIONS.values()) == [72, 150, 300]
+
+    def test_labels_match_values(self) -> None:
+        for label, value in DPI_OPTIONS.items():
+            assert str(value) in label
 
 
 class TestGetDevice:
