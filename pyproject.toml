@@ -1,7 +1,7 @@
 [project]
 name = "embedding-pipeline"
 version = "0.1.0"
-description = "Streamlit web app for generating vector embeddings from PDF documents and searching over them using Nomic's multimodal embedding model."
+description = "Streamlit web app for generating vector embeddings from multiple PDF documents and searching over them using Nomic's multimodal embedding model."
 requires-python = ">=3.12"
 dependencies = [
     "colpali-engine>=0.3.3",
