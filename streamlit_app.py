@@ -8,6 +8,7 @@ from colpali_engine.models import BiQwen2_5, BiQwen2_5_Processor
 from PIL import Image
 
 MODEL_ID = "nomic-ai/nomic-embed-multimodal-3b"
+DPI_OPTIONS = {"Low (72)": 72, "Medium (150)": 150, "High (300)": 300}
 
 
 def get_device() -> str:
@@ -89,14 +90,8 @@ if uploaded_file:
     size_mb = len(uploaded_file.getvalue()) / 1_048_576
     st.caption(f"{uploaded_file.name} · {size_mb:.1f} MB")
 
-    dpi = st.slider(
-        "Render DPI",
-        min_value=72,
-        max_value=300,
-        value=150,
-        step=1,
-        help="72 = Low · 150 = Medium · 300 = High",
-    )
+    dpi_label = st.radio("Render DPI", DPI_OPTIONS, index=1, horizontal=True)
+    dpi = DPI_OPTIONS[dpi_label]
 
     # Clear stale results if a different file was uploaded
     if st.session_state.get("file_id") != uploaded_file.file_id:
