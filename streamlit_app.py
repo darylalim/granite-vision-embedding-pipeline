@@ -129,99 +129,156 @@ st.set_page_config(page_title="Embedding Pipeline", layout="centered")
 st.title("Embedding Pipeline")
 st.write("Generate vector embeddings from PDF documents with Nomic Embed Multimodal.")
 
-uploaded_file = st.file_uploader("Upload file", type=["pdf"])
+uploaded_files = st.file_uploader(
+    "Upload files", type=["pdf"], accept_multiple_files=True
+)
 
 device = get_device()
 
-if uploaded_file:
-    size_mb = len(uploaded_file.getvalue()) / 1_048_576
-    st.caption(f"{uploaded_file.name} · {size_mb:.1f} MB")
+if uploaded_files:
+    total_size_mb = sum(len(f.getvalue()) for f in uploaded_files) / 1_048_576
+    st.caption(f"{len(uploaded_files)} file(s) · {total_size_mb:.1f} MB")
 
     dpi_label = st.radio("Render DPI", DPI_OPTIONS, index=1, horizontal=True)
     dpi = DPI_OPTIONS[dpi_label]
 
-    # Clear stale results if a different file was uploaded
-    if st.session_state.get("results", {}).get("file_id") != uploaded_file.file_id:
-        st.session_state.pop("results", None)
-        st.session_state.pop("search_results", None)
-
-    if st.button("Embed", type="primary"):
-        try:
-            total_start = time.perf_counter_ns()
-
-            progress = st.progress(0.0, text="Loading model...")
-
-            # Load model
-            model, processor = load_model(device)
-
-            # Render PDF pages as images
-            progress.progress(0.33, text="Rendering pages...")
-            pages = render_pages(uploaded_file.read(), dpi=dpi)
-
-            if not pages:
-                raise ValueError("PDF contains no pages to embed.")
-
-            # Generate embeddings
-            progress.progress(0.66, text="Generating embeddings...")
-            page_embeddings = embed(pages, model, processor)
-
-            total_duration = time.perf_counter_ns() - total_start
-
-            progress.progress(1.0, text="Complete.")
-            progress.empty()
-
-            # Store results in session state
-            results: EmbedResults = {
-                "file_id": uploaded_file.file_id,
-                "pages": pages,
-                "page_embeddings": page_embeddings,
-                "total_duration": total_duration,
-                "file_stem": uploaded_file.name.rsplit(".", 1)[0],
-                "dpi": dpi,
-                "json": json.dumps(
-                    {
-                        "model": MODEL_ID,
-                        "dpi": dpi,
-                        "embeddings": page_embeddings.tolist(),
-                        "total_duration": total_duration,
-                        "page_count": len(pages),
-                    }
-                ),
-            }
-            st.session_state.results = results
-            st.session_state.pop("search_results", None)
-
-        except (OSError, RuntimeError, ValueError) as e:
-            st.error(str(e))
-        except Exception as e:
-            st.exception(e)
-
+    # Clean up stale results for removed files
     if "results" in st.session_state:
-        r: EmbedResults = st.session_state.results
+        current_ids = {f.file_id for f in uploaded_files}
+        prev_count = len(st.session_state.results)
+        cleanup_stale_results(current_ids, st.session_state.results)
+        if len(st.session_state.results) < prev_count:
+            st.session_state.pop("search_results", None)
+        if not st.session_state.results:
+            del st.session_state["results"]
 
-        st.success("Done.")
+    existing_results = st.session_state.get("results", {})
+    files_to_embed = [f for f in uploaded_files if f.file_id not in existing_results]
 
-        with st.expander(f"Page previews ({len(r['pages'])})"):
-            cols = st.columns(min(len(r["pages"]), 4))
-            for i, page in enumerate(r["pages"]):
-                cols[i % 4].image(page, caption=f"Page {i + 1}", width="stretch")
+    col_embed, col_reembed = st.columns(2)
+    embed_clicked = col_embed.button(
+        "Embed", type="primary", disabled=not files_to_embed
+    )
+    reembed_clicked = col_reembed.button("Re-embed All")
+
+    if embed_clicked or reembed_clicked:
+        if reembed_clicked:
+            st.session_state.pop("results", None)
+            files_to_embed = list(uploaded_files)
+
+        if files_to_embed:
+            try:
+                progress = st.progress(0.0, text="Loading model...")
+                model, processor = load_model(device)
+                results: dict[str, EmbedResults] = st.session_state.get("results", {})
+
+                for i, f in enumerate(files_to_embed):
+                    file_stem = f.name.rsplit(".", 1)[0]
+                    progress.progress(
+                        i / len(files_to_embed),
+                        text=f"Processing {f.name}...",
+                    )
+                    try:
+                        total_start = time.perf_counter_ns()
+                        pages = render_pages(f.read(), dpi=dpi)
+                        if not pages:
+                            st.error(f"{f.name}: PDF contains no pages to embed.")
+                            continue
+                        page_embeddings = embed(pages, model, processor)
+                        total_duration = time.perf_counter_ns() - total_start
+
+                        results[f.file_id] = {
+                            "file_id": f.file_id,
+                            "pages": pages,
+                            "page_embeddings": page_embeddings,
+                            "total_duration": total_duration,
+                            "file_stem": file_stem,
+                            "dpi": dpi,
+                            "json": json.dumps(
+                                {
+                                    "file_name": file_stem,
+                                    "model": MODEL_ID,
+                                    "dpi": dpi,
+                                    "embeddings": page_embeddings.tolist(),
+                                    "total_duration": total_duration,
+                                    "page_count": len(pages),
+                                }
+                            ),
+                        }
+                    except (OSError, RuntimeError, ValueError) as e:
+                        st.error(f"{f.name}: {e}")
+                    except Exception as e:
+                        st.exception(e)
+
+                progress.progress(1.0, text="Complete.")
+                progress.empty()
+                st.session_state.results = results
+                st.session_state.pop("search_results", None)
+
+            except (OSError, RuntimeError) as e:
+                st.error(str(e))
+            except Exception as e:
+                st.exception(e)
+
+    if "results" in st.session_state and st.session_state.results:
+        all_results: dict[str, EmbedResults] = st.session_state.results
+
+        st.success(f"Embedded {len(all_results)} document(s).")
+
+        # Summary metrics
+        total_pages = sum(len(r["pages"]) for r in all_results.values())
+        total_duration_ns = sum(r["total_duration"] for r in all_results.values())
 
         st.subheader("Metrics")
         st.metric("Model", MODEL_ID)
         col1, col2, col3 = st.columns(3)
-        duration_s = r["total_duration"] / 1_000_000_000
-        col1.metric("Duration", f"{duration_s:.2f} s")
-        col2.metric("Page Count", len(r["pages"]))
-        col3.metric("DPI", r["dpi"])
+        col1.metric("Duration", f"{total_duration_ns / 1_000_000_000:.2f} s")
+        col2.metric("Pages", total_pages)
+        col3.metric("Documents", len(all_results))
 
-        st.download_button(
-            label="Download JSON",
-            data=r["json"],
-            file_name=f"{r['file_stem']}_embedding.json",
-            mime="application/json",
-        )
+        # Per-document expanders
+        for file_id, r in all_results.items():
+            with st.expander(f"{r['file_stem']} ({len(r['pages'])} pages)"):
+                cols = st.columns(min(len(r["pages"]), 4))
+                for i, page in enumerate(r["pages"]):
+                    cols[i % 4].image(page, caption=f"Page {i + 1}", width="stretch")
+                doc_duration = r["total_duration"] / 1_000_000_000
+                st.caption(
+                    f"Duration: {doc_duration:.2f} s · "
+                    f"Pages: {len(r['pages'])} · DPI: {r['dpi']}"
+                )
+                st.download_button(
+                    label=f"Download {r['file_stem']} JSON",
+                    data=r["json"],
+                    file_name=f"{r['file_stem']}_embedding.json",
+                    mime="application/json",
+                    key=f"download_{file_id}",
+                )
 
+        # Download All
+        if len(all_results) > 1:
+            all_json = "[" + ",".join(r["json"] for r in all_results.values()) + "]"
+            st.download_button(
+                label="Download All JSON",
+                data=all_json,
+                file_name="all_embeddings.json",
+                mime="application/json",
+                key="download_all",
+            )
+
+        # Search
         st.subheader("Search")
+        filter_options = ["All documents"] + [
+            r["file_stem"] for r in all_results.values()
+        ]
+        filter_file_ids: list[str | None] = [None] + list(all_results.keys())
+        filter_idx = st.selectbox(
+            "Document filter",
+            range(len(filter_options)),
+            format_func=lambda i: filter_options[i],
+        )
+        selected_file_id = filter_file_ids[filter_idx]
+
         query = st.text_input("Text query")
         if st.button("Search"):
             if not query:
@@ -229,8 +286,12 @@ if uploaded_file:
             else:
                 try:
                     model, processor = load_model(device)
-                    st.session_state.search_results = search(
-                        query, model, processor, r["page_embeddings"]
+                    st.session_state.search_results = search_multi(
+                        query,
+                        model,
+                        processor,
+                        all_results,
+                        filter_file_id=selected_file_id,
                     )
                 except (OSError, RuntimeError, ValueError) as e:
                     st.error(str(e))
@@ -239,12 +300,16 @@ if uploaded_file:
 
         if "search_results" in st.session_state:
             search_results = st.session_state.search_results
-            cols = st.columns(min(len(search_results), 4))
-            for rank, (page_idx, score) in enumerate(search_results):
-                cols[rank % 4].image(
-                    r["pages"][page_idx],
-                    caption=f"Page {page_idx + 1} · {score:.4f}",
-                    width="stretch",
-                )
+            if search_results:
+                cols = st.columns(min(len(search_results), 4))
+                for rank, (fid, page_idx, score) in enumerate(search_results):
+                    r = all_results[fid]
+                    cols[rank % 4].image(
+                        r["pages"][page_idx],
+                        caption=(
+                            f"{r['file_stem']} · Page {page_idx + 1} · {score:.4f}"
+                        ),
+                        width="stretch",
+                    )
 
 st.caption(f"Device: {device.upper()}")
