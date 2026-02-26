@@ -94,17 +94,9 @@ if uploaded_file:
     dpi = DPI_OPTIONS[dpi_label]
 
     # Clear stale results if a different file was uploaded
-    if st.session_state.get("file_id") != uploaded_file.file_id:
-        for key in (
-            "pages",
-            "page_embeddings",
-            "total_duration",
-            "file_stem",
-            "search_results",
-            "file_id",
-            "dpi",
-        ):
-            st.session_state.pop(key, None)
+    if st.session_state.get("results", {}).get("file_id") != uploaded_file.file_id:
+        st.session_state.pop("results", None)
+        st.session_state.pop("search_results", None)
 
     if st.button("Embed", type="primary"):
         try:
@@ -132,12 +124,23 @@ if uploaded_file:
             progress.empty()
 
             # Store results in session state
-            st.session_state.file_id = uploaded_file.file_id
-            st.session_state.pages = pages
-            st.session_state.page_embeddings = page_embeddings
-            st.session_state.total_duration = total_duration
-            st.session_state.file_stem = uploaded_file.name.rsplit(".", 1)[0]
-            st.session_state.dpi = dpi
+            st.session_state.results = {
+                "file_id": uploaded_file.file_id,
+                "pages": pages,
+                "page_embeddings": page_embeddings,
+                "total_duration": total_duration,
+                "file_stem": uploaded_file.name.rsplit(".", 1)[0],
+                "dpi": dpi,
+                "json": json.dumps(
+                    {
+                        "model": MODEL_ID,
+                        "dpi": dpi,
+                        "embeddings": page_embeddings.tolist(),
+                        "total_duration": total_duration,
+                        "page_count": len(pages),
+                    }
+                ),
+            }
             st.session_state.pop("search_results", None)
 
         except (OSError, RuntimeError, ValueError) as e:
@@ -145,39 +148,28 @@ if uploaded_file:
         except Exception as e:
             st.exception(e)
 
-    if "pages" in st.session_state:
-        pages = st.session_state.pages
-        page_embeddings = st.session_state.page_embeddings
-        total_duration = st.session_state.total_duration
-        file_stem = st.session_state.file_stem
-        dpi = st.session_state.dpi
+    if "results" in st.session_state:
+        r = st.session_state.results
 
         st.success("Done.")
 
-        with st.expander(f"Page previews ({len(pages)})"):
-            cols = st.columns(min(len(pages), 4))
-            for i, page in enumerate(pages):
+        with st.expander(f"Page previews ({len(r['pages'])})"):
+            cols = st.columns(min(len(r["pages"]), 4))
+            for i, page in enumerate(r["pages"]):
                 cols[i % 4].image(page, caption=f"Page {i + 1}", width="stretch")
 
         st.subheader("Metrics")
         st.metric("Model", MODEL_ID)
         col1, col2, col3 = st.columns(3)
-        duration_s = total_duration / 1_000_000_000
+        duration_s = r["total_duration"] / 1_000_000_000
         col1.metric("Duration", f"{duration_s:.2f} s")
-        col2.metric("Page Count", len(pages))
-        col3.metric("DPI", dpi)
+        col2.metric("Page Count", len(r["pages"]))
+        col3.metric("DPI", r["dpi"])
 
-        embedding_data = {
-            "model": MODEL_ID,
-            "dpi": dpi,
-            "embeddings": page_embeddings.tolist(),
-            "total_duration": total_duration,
-            "page_count": len(pages),
-        }
         st.download_button(
             label="Download JSON",
-            data=json.dumps(embedding_data),
-            file_name=f"{file_stem}_embedding.json",
+            data=r["json"],
+            file_name=f"{r['file_stem']}_embedding.json",
             mime="application/json",
         )
 
@@ -190,7 +182,7 @@ if uploaded_file:
                 try:
                     model, processor = load_model(device)
                     st.session_state.search_results = search(
-                        query, model, processor, page_embeddings
+                        query, model, processor, r["page_embeddings"]
                     )
                 except (OSError, RuntimeError, ValueError) as e:
                     st.error(str(e))
@@ -198,11 +190,11 @@ if uploaded_file:
                     st.exception(e)
 
         if "search_results" in st.session_state:
-            results = st.session_state.search_results
-            cols = st.columns(min(len(results), 4))
-            for rank, (page_idx, score) in enumerate(results):
+            search_results = st.session_state.search_results
+            cols = st.columns(min(len(search_results), 4))
+            for rank, (page_idx, score) in enumerate(search_results):
                 cols[rank % 4].image(
-                    pages[page_idx],
+                    r["pages"][page_idx],
                     caption=f"Page {page_idx + 1} · {score:.4f}",
                     width="stretch",
                 )
