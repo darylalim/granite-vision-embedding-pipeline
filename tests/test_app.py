@@ -5,9 +5,36 @@ import torch
 from PIL import Image
 from pytest import approx
 
-from streamlit_app import DPI_OPTIONS, embed, get_device, render_pages, search
+from streamlit_app import (
+    DPI_OPTIONS,
+    EmbedResults,
+    cleanup_stale_results,
+    embed,
+    get_device,
+    render_pages,
+    search,
+)
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
+
+def _make_result(
+    file_id: str,
+    file_stem: str,
+    *,
+    page_embeddings: torch.Tensor | None = None,
+) -> EmbedResults:
+    return {
+        "file_id": file_id,
+        "pages": [],
+        "page_embeddings": page_embeddings
+        if page_embeddings is not None
+        else torch.empty(0),
+        "total_duration": 0,
+        "file_stem": file_stem,
+        "dpi": 150,
+        "json": "{}",
+    }
 
 
 class TestDpiOptions:
@@ -156,3 +183,33 @@ class TestSearch:
         mock_processor.process_texts.assert_called_once_with(["find charts"])
         mock_batch.to.assert_called_once_with("cpu")
         mock_processor.score.assert_called_once()
+
+
+class TestCleanupStaleResults:
+    def test_removes_stale_entries(self) -> None:
+        results: dict[str, EmbedResults] = {
+            "id1": _make_result("id1", "doc1"),
+            "id2": _make_result("id2", "doc2"),
+        }
+        cleanup_stale_results({"id1"}, results)
+        assert "id1" in results
+        assert "id2" not in results
+
+    def test_keeps_all_when_none_stale(self) -> None:
+        results: dict[str, EmbedResults] = {
+            "id1": _make_result("id1", "doc1"),
+        }
+        cleanup_stale_results({"id1"}, results)
+        assert len(results) == 1
+
+    def test_removes_all_when_all_stale(self) -> None:
+        results: dict[str, EmbedResults] = {
+            "id1": _make_result("id1", "doc1"),
+        }
+        cleanup_stale_results(set(), results)
+        assert len(results) == 0
+
+    def test_handles_empty_results(self) -> None:
+        results: dict[str, EmbedResults] = {}
+        cleanup_stale_results({"id1"}, results)
+        assert len(results) == 0

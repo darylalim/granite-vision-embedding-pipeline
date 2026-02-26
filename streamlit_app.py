@@ -88,6 +88,14 @@ def search(
     return ranked
 
 
+def cleanup_stale_results(
+    current_file_ids: set[str], results: dict[str, EmbedResults]
+) -> None:
+    """Remove results for files no longer in the uploader."""
+    for file_id in set(results.keys()) - current_file_ids:
+        del results[file_id]
+
+
 # UI
 st.set_page_config(page_title="Embedding Pipeline", layout="centered")
 st.title("Embedding Pipeline")
