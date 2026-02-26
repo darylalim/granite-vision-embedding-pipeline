@@ -96,6 +96,34 @@ def cleanup_stale_results(
         del results[file_id]
 
 
+def search_multi(
+    query: str,
+    model: BiQwen2_5,
+    processor: BiQwen2_5_Processor,
+    results: dict[str, EmbedResults],
+    filter_file_id: str | None = None,
+) -> list[tuple[str, int, float]]:
+    """Score a text query across multiple documents and return ranked results."""
+    docs = (
+        {filter_file_id: results[filter_file_id]}
+        if filter_file_id is not None
+        else results
+    )
+    batch = processor.process_texts([query]).to(model.device)
+    with torch.inference_mode():
+        query_embedding = model(**batch)
+    ranked: list[tuple[str, int, float]] = []
+    for file_id, r in docs.items():
+        scores = processor.score(
+            qs=[query_embedding[0]],
+            ps=list(r["page_embeddings"]),
+        )
+        for page_idx, score in enumerate(scores[0]):
+            ranked.append((file_id, page_idx, score.item()))
+    ranked.sort(key=lambda x: x[2], reverse=True)
+    return ranked
+
+
 # UI
 st.set_page_config(page_title="Embedding Pipeline", layout="centered")
 st.title("Embedding Pipeline")

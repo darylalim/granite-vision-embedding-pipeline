@@ -13,6 +13,7 @@ from streamlit_app import (
     get_device,
     render_pages,
     search,
+    search_multi,
 )
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -213,3 +214,98 @@ class TestCleanupStaleResults:
         results: dict[str, EmbedResults] = {}
         cleanup_stale_results({"id1"}, results)
         assert len(results) == 0
+
+
+class TestSearchMulti:
+    def test_returns_cross_document_ranked_results(self) -> None:
+        mock_processor = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.to.return_value = mock_batch
+        mock_processor.process_texts.return_value = mock_batch
+
+        query_embedding = torch.tensor([[0.1, 0.2, 0.3]])
+        mock_model = MagicMock()
+        mock_model.device = "cpu"
+        mock_model.return_value = query_embedding
+
+        # Doc A: 2 pages scoring [0.3, 0.8], Doc B: 1 page scoring [0.6]
+        mock_processor.score.side_effect = [
+            torch.tensor([[0.3, 0.8]]),
+            torch.tensor([[0.6]]),
+        ]
+
+        results: dict[str, EmbedResults] = {
+            "id_a": _make_result(
+                "id_a", "doc_a", page_embeddings=torch.randn(2, 4, 128)
+            ),
+            "id_b": _make_result(
+                "id_b", "doc_b", page_embeddings=torch.randn(1, 4, 128)
+            ),
+        }
+
+        ranked = search_multi("test query", mock_model, mock_processor, results)
+
+        assert len(ranked) == 3
+        assert ranked[0] == ("id_a", 1, approx(0.8))
+        assert ranked[1] == ("id_b", 0, approx(0.6))
+        assert ranked[2] == ("id_a", 0, approx(0.3))
+
+    def test_filters_to_single_document(self) -> None:
+        mock_processor = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.to.return_value = mock_batch
+        mock_processor.process_texts.return_value = mock_batch
+
+        query_embedding = torch.tensor([[0.1, 0.2, 0.3]])
+        mock_model = MagicMock()
+        mock_model.device = "cpu"
+        mock_model.return_value = query_embedding
+
+        mock_processor.score.return_value = torch.tensor([[0.5]])
+
+        results: dict[str, EmbedResults] = {
+            "id_a": _make_result(
+                "id_a", "doc_a", page_embeddings=torch.randn(1, 4, 128)
+            ),
+            "id_b": _make_result(
+                "id_b", "doc_b", page_embeddings=torch.randn(1, 4, 128)
+            ),
+        }
+
+        ranked = search_multi(
+            "test query", mock_model, mock_processor, results, filter_file_id="id_b"
+        )
+
+        assert len(ranked) == 1
+        assert ranked[0][0] == "id_b"
+        assert mock_processor.score.call_count == 1
+
+    def test_encodes_query_once_for_multiple_docs(self) -> None:
+        mock_processor = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.to.return_value = mock_batch
+        mock_processor.process_texts.return_value = mock_batch
+
+        query_embedding = torch.tensor([[0.1, 0.2, 0.3]])
+        mock_model = MagicMock()
+        mock_model.device = "cpu"
+        mock_model.return_value = query_embedding
+
+        mock_processor.score.side_effect = [
+            torch.tensor([[0.3]]),
+            torch.tensor([[0.6]]),
+        ]
+
+        results: dict[str, EmbedResults] = {
+            "id_a": _make_result(
+                "id_a", "doc_a", page_embeddings=torch.randn(1, 4, 128)
+            ),
+            "id_b": _make_result(
+                "id_b", "doc_b", page_embeddings=torch.randn(1, 4, 128)
+            ),
+        }
+
+        search_multi("test", mock_model, mock_processor, results)
+
+        mock_processor.process_texts.assert_called_once_with(["test"])
+        assert mock_model.call_count == 1
