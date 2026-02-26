@@ -89,6 +89,15 @@ if uploaded_file:
     size_mb = len(uploaded_file.getvalue()) / 1_048_576
     st.caption(f"{uploaded_file.name} · {size_mb:.1f} MB")
 
+    dpi = st.slider(
+        "Render DPI",
+        min_value=72,
+        max_value=300,
+        value=150,
+        step=1,
+        help="72 = Low · 150 = Medium · 300 = High",
+    )
+
     # Clear stale results if a different file was uploaded
     if st.session_state.get("file_id") != uploaded_file.file_id:
         for key in (
@@ -98,6 +107,7 @@ if uploaded_file:
             "file_stem",
             "search_results",
             "file_id",
+            "dpi",
         ):
             st.session_state.pop(key, None)
 
@@ -112,7 +122,7 @@ if uploaded_file:
 
             # Render PDF pages as images
             progress.progress(0.33, text="Rendering pages...")
-            pages = render_pages(uploaded_file.read())
+            pages = render_pages(uploaded_file.read(), dpi=dpi)
 
             if not pages:
                 raise ValueError("PDF contains no pages to embed.")
@@ -132,6 +142,7 @@ if uploaded_file:
             st.session_state.page_embeddings = page_embeddings
             st.session_state.total_duration = total_duration
             st.session_state.file_stem = uploaded_file.name.rsplit(".", 1)[0]
+            st.session_state.dpi = dpi
             st.session_state.pop("search_results", None)
 
         except (OSError, RuntimeError, ValueError) as e:
