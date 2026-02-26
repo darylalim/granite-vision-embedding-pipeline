@@ -98,7 +98,8 @@ Text query scores against page embeddings across all documents via `search_multi
 ## Tests
 
 - `tests/test_app.py` — unit tests for `DPI_OPTIONS`, `get_device`, `render_pages`, `embed`, `search`, `cleanup_stale_results`, and `search_multi`
-- `tests/fixtures/test.pdf` — minimal PDF fixture for `render_pages` tests
+- `tests/data/pdf/single_page.pdf` — single-page PDF fixture for `render_pages` tests
+- `tests/data/pdf/multi_page.pdf` — multi-page PDF fixture for `render_pages` tests
 
 ## Resources
 
