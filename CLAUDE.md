@@ -50,7 +50,7 @@ uv run streamlit run streamlit_app.py
 
 ### Pipeline
 
-PDF upload → render pages as images at configurable DPI (`pymupdf`) → embed images (`BiQwen2_5`) → download JSON / search pages by text query
+Multi-PDF upload → render pages as images at configurable DPI (`pymupdf`) → embed images (`BiQwen2_5`) → download per-document or combined JSON / search pages by text query across all documents or filtered to one
 
 ### Performance
 
@@ -74,12 +74,13 @@ PDF upload → render pages as images at configurable DPI (`pymupdf`) → embed 
 
 ### Session State
 
-Embed results stored in a single `st.session_state.results` dict with keys: `file_id`, `pages`, `page_embeddings`, `total_duration`, `file_stem`, `dpi`, `json`. Cleared on new file upload.
+Embed results stored in `st.session_state.results: dict[str, EmbedResults]` keyed by `file_id`. Each entry has keys: `file_id`, `pages`, `page_embeddings`, `total_duration`, `file_stem`, `dpi`, `json`. Stale entries cleaned up when files are removed from the uploader via `cleanup_stale_results`.
 
 ### JSON Download
 
-Pre-computed JSON string cached in `results["json"]` at embed time. Fields in the downloadable JSON via `st.download_button`:
+Pre-computed JSON string cached in each `results[file_id]["json"]` at embed time. Per-document download via `st.download_button`, plus "Download All" that concatenates all entries into a JSON array. Fields per document:
 
+- `file_name` (string) — file stem without extension
 - `model` (string) — model that produced the embeddings
 - `dpi` (integer) — render resolution in dots per inch (72–300)
 - `embeddings` (number[][][]) — per-page multi-vector embeddings (page → patches → 128-dim vectors)
@@ -88,7 +89,7 @@ Pre-computed JSON string cached in `results["json"]` at embed time. Fields in th
 
 ### Search
 
-Text query input scores against page embeddings via `processor.score()` and displays pages ranked by relevance. Search results persist as a separate `st.session_state.search_results` key, cleared on new file upload or new embed.
+Text query scores against page embeddings across all documents via `search_multi`, with an optional document filter (`st.selectbox`). Results display page image, document name, page number, and score. Search results persist as `st.session_state.search_results`, cleared on new embed.
 
 ### Metrics
 
@@ -96,7 +97,7 @@ Text query input scores against page embeddings via `processor.score()` and disp
 
 ## Tests
 
-- `tests/test_app.py` — unit tests for `DPI_OPTIONS`, `get_device`, `render_pages`, `embed`, and `search`
+- `tests/test_app.py` — unit tests for `DPI_OPTIONS`, `get_device`, `render_pages`, `embed`, `search`, `cleanup_stale_results`, and `search_multi`
 - `tests/fixtures/test.pdf` — minimal PDF fixture for `render_pages` tests
 
 ## Resources
