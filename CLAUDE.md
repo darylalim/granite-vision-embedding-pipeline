@@ -50,7 +50,7 @@ uv run streamlit run streamlit_app.py
 
 ### Pipeline
 
-PDF upload → render pages as images (`pymupdf`) → embed images (`BiQwen2_5`) → download JSON / search pages by text query
+PDF upload → render pages as images at configurable DPI (`pymupdf`) → embed images (`BiQwen2_5`) → download JSON / search pages by text query
 
 ### Performance
 
@@ -75,6 +75,7 @@ PDF upload → render pages as images (`pymupdf`) → embed images (`BiQwen2_5`)
 Fields in the downloadable JSON via `st.download_button`:
 
 - `model` (string) — model that produced the embeddings
+- `dpi` (integer) — render resolution in dots per inch (72–300)
 - `embeddings` (number[][][]) — per-page multi-vector embeddings (page → patches → 128-dim vectors)
 - `total_duration` (integer) — total duration in nanoseconds
 - `page_count` (integer) — number of PDF pages processed
