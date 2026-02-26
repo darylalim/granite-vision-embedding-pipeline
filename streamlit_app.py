@@ -155,6 +155,7 @@ if uploaded_file:
         page_embeddings = st.session_state.page_embeddings
         total_duration = st.session_state.total_duration
         file_stem = st.session_state.file_stem
+        dpi = st.session_state.dpi
 
         st.success("Done.")
 
@@ -165,13 +166,15 @@ if uploaded_file:
 
         st.subheader("Metrics")
         st.metric("Model", MODEL_ID)
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         duration_s = total_duration / 1_000_000_000
         col1.metric("Duration", f"{duration_s:.2f} s")
         col2.metric("Page Count", len(pages))
+        col3.metric("DPI", dpi)
 
         embedding_data = {
             "model": MODEL_ID,
+            "dpi": dpi,
             "embeddings": page_embeddings.tolist(),
             "total_duration": total_duration,
             "page_count": len(pages),
