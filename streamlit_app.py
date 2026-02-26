@@ -1,5 +1,6 @@
 import json
 import time
+from typing import TypedDict
 
 import fitz
 import streamlit as st
@@ -9,6 +10,16 @@ from PIL import Image
 
 MODEL_ID = "nomic-ai/nomic-embed-multimodal-3b"
 DPI_OPTIONS = {"Low (72)": 72, "Medium (150)": 150, "High (300)": 300}
+
+
+class EmbedResults(TypedDict):
+    file_id: str
+    pages: list[Image.Image]
+    page_embeddings: torch.Tensor
+    total_duration: int
+    file_stem: str
+    dpi: int
+    json: str
 
 
 def get_device() -> str:
@@ -124,7 +135,7 @@ if uploaded_file:
             progress.empty()
 
             # Store results in session state
-            st.session_state.results = {
+            results: EmbedResults = {
                 "file_id": uploaded_file.file_id,
                 "pages": pages,
                 "page_embeddings": page_embeddings,
@@ -141,6 +152,7 @@ if uploaded_file:
                     }
                 ),
             }
+            st.session_state.results = results
             st.session_state.pop("search_results", None)
 
         except (OSError, RuntimeError, ValueError) as e:
@@ -149,7 +161,7 @@ if uploaded_file:
             st.exception(e)
 
     if "results" in st.session_state:
-        r = st.session_state.results
+        r: EmbedResults = st.session_state.results
 
         st.success("Done.")
 
