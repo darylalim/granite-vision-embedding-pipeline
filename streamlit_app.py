@@ -29,14 +29,16 @@ def load_model(device: str) -> tuple[BiQwen2_5, BiQwen2_5_Processor]:
     return model, processor
 
 
-def render_pages(data: bytes) -> list[Image.Image]:
+def render_pages(data: bytes, dpi: int = 150) -> list[Image.Image]:
     """Render PDF pages as PIL Images."""
     try:
+        scale = dpi / 72
+        matrix = fitz.Matrix(scale, scale)
         with fitz.open(stream=data, filetype="pdf") as doc:
             return [
                 Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
                 for page in doc
-                for pix in [page.get_pixmap()]
+                for pix in [page.get_pixmap(matrix=matrix)]
             ]
     except (fitz.FileDataError, fitz.EmptyFileError):
         return []

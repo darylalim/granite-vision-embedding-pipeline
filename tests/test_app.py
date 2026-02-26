@@ -46,6 +46,19 @@ class TestRenderPages:
         pages = render_pages(b"not a pdf")
         assert pages == []
 
+    def test_higher_dpi_produces_larger_images(self) -> None:
+        data = (FIXTURE_DIR / "test.pdf").read_bytes()
+        pages_72 = render_pages(data, dpi=72)
+        pages_150 = render_pages(data, dpi=150)
+        assert pages_150[0].width > pages_72[0].width
+        assert pages_150[0].height > pages_72[0].height
+
+    def test_default_dpi_is_150(self) -> None:
+        data = (FIXTURE_DIR / "test.pdf").read_bytes()
+        pages_default = render_pages(data)
+        pages_150 = render_pages(data, dpi=150)
+        assert pages_default[0].size == pages_150[0].size
+
 
 class TestEmbed:
     def test_returns_per_page_embeddings(self) -> None:
