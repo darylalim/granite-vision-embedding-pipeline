@@ -93,7 +93,7 @@ Text query scores against page embeddings across all documents via `search_multi
 
 ### Metrics
 
-`st.metric` displays model, duration (seconds), page count, and DPI.
+`st.metric` displays model, duration (seconds), page count, and document count. Per-document expanders show duration, page count, and DPI.
 
 ## Tests
 
