@@ -26,7 +26,7 @@ uv run streamlit run streamlit_app.py
 
 ## Dependencies
 
-- `colpali-engine` — multimodal embedding model (`BiQwen2_5`, `BiQwen2_5_Processor`)
+- `colpali-engine` — multimodal embedding model (`ColQwen2_5`, `ColQwen2_5_Processor`)
 - `pymupdf` — PDF page rendering
 - `torch` — tensor operations
 - `streamlit` — web user interface
@@ -46,11 +46,11 @@ uv run streamlit run streamlit_app.py
 
 ### Embedding Model
 
-[Nomic Embed Multimodal 3B](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b) — multi-vector vision-language embedding model
+[ColNomic Embed Multimodal 3B](https://huggingface.co/nomic-ai/colnomic-embed-multimodal-3b) — multi-vector vision-language embedding model
 
 ### Pipeline
 
-Multi-PDF upload → render pages as images at configurable DPI (`pymupdf`) → embed images (`BiQwen2_5`) → download per-document or combined JSON / search pages by text query across all documents or filtered to one
+Multi-PDF upload → render pages as images at configurable DPI (`pymupdf`) → embed images (`ColQwen2_5`) → download per-document or combined JSON / search pages by text query across all documents or filtered to one
 
 ### Performance
 
@@ -63,7 +63,7 @@ Multi-PDF upload → render pages as images at configurable DPI (`pymupdf`) → 
 
 ### Constants
 
-- `MODEL_ID = "nomic-ai/nomic-embed-multimodal-3b"`
+- `MODEL_ID = "nomic-ai/colnomic-embed-multimodal-3b"`
 - `DPI_OPTIONS = {"Low (72)": 72, "Medium (150)": 150, "High (300)": 300}`
 
 ### Error Handling
@@ -103,5 +103,5 @@ Text query scores against page embeddings across all documents via `search_multi
 
 ## Resources
 
-- [Model Card](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b)
+- [Model Card](https://huggingface.co/nomic-ai/colnomic-embed-multimodal-3b)
 - [ColPali Engine](https://github.com/illuin-tech/colpali)
