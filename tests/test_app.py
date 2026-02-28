@@ -1,8 +1,11 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import io
+
+import pytest
 import torch
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from pytest import approx
 
 from streamlit_app import (
@@ -18,7 +21,8 @@ from streamlit_app import (
     search_multi,
 )
 
-DATA_DIR = Path(__file__).parent / "data" / "pdf"
+PDF_DATA_DIR = Path(__file__).parent / "data" / "pdf"
+IMAGE_DATA_DIR = Path(__file__).parent / "data" / "images"
 
 
 def _make_result(
@@ -57,6 +61,47 @@ class TestImageExtensions:
         assert IMAGE_EXTENSIONS == {"png", "jpg", "jpeg", "webp"}
 
 
+class TestLoadImage:
+    def test_loads_png_as_rgb(self) -> None:
+        img = Image.open(IMAGE_DATA_DIR / "red.png").convert("RGB")
+        assert img.mode == "RGB"
+        assert img.size == (64, 64)
+
+    def test_loads_jpg_as_rgb(self) -> None:
+        img = Image.open(IMAGE_DATA_DIR / "blue.jpg").convert("RGB")
+        assert img.mode == "RGB"
+        assert img.size == (64, 64)
+
+    def test_loads_webp_as_rgb(self) -> None:
+        img = Image.open(IMAGE_DATA_DIR / "green.webp").convert("RGB")
+        assert img.mode == "RGB"
+        assert img.size == (64, 64)
+
+    def test_embed_accepts_image_fixture(self) -> None:
+        mock_processor = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.to.return_value = mock_batch
+        mock_processor.process_images.return_value = mock_batch
+
+        mock_model = MagicMock()
+        mock_model.device = "cpu"
+        mock_model.return_value = torch.randn(1, 4, 128)
+
+        img = Image.open(IMAGE_DATA_DIR / "red.png").convert("RGB")
+        result = embed([img], mock_model, mock_processor)
+
+        assert isinstance(result, torch.Tensor)
+        mock_processor.process_images.assert_called_once_with([img])
+
+    def test_missing_file_raises_file_not_found(self) -> None:
+        with pytest.raises(FileNotFoundError):
+            Image.open(IMAGE_DATA_DIR / "nonexistent.png")
+
+    def test_corrupt_data_raises_unidentified_image(self) -> None:
+        with pytest.raises(UnidentifiedImageError):
+            Image.open(io.BytesIO(b"not an image")).convert("RGB")
+
+
 class TestGetDevice:
     @patch("streamlit_app.torch")
     def test_prefers_mps(self, mock_torch: MagicMock) -> None:
@@ -79,14 +124,14 @@ class TestGetDevice:
 
 class TestRenderPages:
     def test_renders_single_page_pdf(self) -> None:
-        data = (DATA_DIR / "single_page.pdf").read_bytes()
+        data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
         pages = render_pages(data)
         assert len(pages) == 1
         assert isinstance(pages[0], Image.Image)
         assert pages[0].mode == "RGB"
 
     def test_renders_multi_page_pdf(self) -> None:
-        data = (DATA_DIR / "multi_page.pdf").read_bytes()
+        data = (PDF_DATA_DIR / "multi_page.pdf").read_bytes()
         pages = render_pages(data)
         assert len(pages) == 3
         assert all(isinstance(p, Image.Image) for p in pages)
@@ -101,14 +146,14 @@ class TestRenderPages:
         assert pages == []
 
     def test_higher_dpi_produces_larger_images(self) -> None:
-        data = (DATA_DIR / "single_page.pdf").read_bytes()
+        data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
         pages_72 = render_pages(data, dpi=72)
         pages_150 = render_pages(data, dpi=150)
         assert pages_150[0].width > pages_72[0].width
         assert pages_150[0].height > pages_72[0].height
 
     def test_default_dpi_is_150(self) -> None:
-        data = (DATA_DIR / "single_page.pdf").read_bytes()
+        data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
         pages_default = render_pages(data)
         pages_150 = render_pages(data, dpi=150)
         assert pages_default[0].size == pages_150[0].size
