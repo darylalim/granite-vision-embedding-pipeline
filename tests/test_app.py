@@ -10,6 +10,7 @@ from streamlit_app import (
     EmbedResults,
     cleanup_stale_results,
     embed,
+    filter_results,
     get_device,
     render_pages,
     search,
@@ -221,6 +222,51 @@ class TestCleanupStaleResults:
         results: dict[str, EmbedResults] = {}
         cleanup_stale_results({"id1"}, results)
         assert len(results) == 0
+
+
+class TestFilterResults:
+    def test_filters_below_min_score(self) -> None:
+        results: list[tuple[str, int, float]] = [
+            ("id_a", 0, 0.9),
+            ("id_a", 1, 0.3),
+            ("id_b", 0, 0.6),
+        ]
+        filtered = filter_results(results, top_k=10, min_score=0.5)
+        assert len(filtered) == 2
+        assert filtered[0] == ("id_a", 0, approx(0.9))
+        assert filtered[1] == ("id_b", 0, approx(0.6))
+
+    def test_limits_to_top_k(self) -> None:
+        results: list[tuple[str, int, float]] = [
+            ("id_a", 0, 0.9),
+            ("id_b", 0, 0.8),
+            ("id_a", 1, 0.7),
+        ]
+        filtered = filter_results(results, top_k=2)
+        assert len(filtered) == 2
+        assert filtered[0] == ("id_a", 0, approx(0.9))
+        assert filtered[1] == ("id_b", 0, approx(0.8))
+
+    def test_threshold_applied_before_top_k(self) -> None:
+        results: list[tuple[str, int, float]] = [
+            ("id_a", 0, 0.9),
+            ("id_b", 0, 0.8),
+            ("id_a", 1, 0.3),
+            ("id_b", 1, 0.1),
+        ]
+        filtered = filter_results(results, top_k=5, min_score=0.5)
+        assert len(filtered) == 2
+
+    def test_returns_empty_for_empty_input(self) -> None:
+        assert filter_results([], top_k=5, min_score=0.0) == []
+
+    def test_default_values(self) -> None:
+        results: list[tuple[str, int, float]] = [
+            (f"id_{i}", 0, 0.9 - i * 0.1) for i in range(7)
+        ]
+        filtered = filter_results(results)
+        assert len(filtered) == 5
+        assert filtered[0][2] == approx(0.9)
 
 
 class TestSearchMulti:

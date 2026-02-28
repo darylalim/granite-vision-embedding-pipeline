@@ -96,6 +96,16 @@ def cleanup_stale_results(
         del results[file_id]
 
 
+def filter_results(
+    results: list[tuple[str, int, float]],
+    top_k: int = 5,
+    min_score: float = 0.0,
+) -> list[tuple[str, int, float]]:
+    """Apply score threshold then top-K to ranked search results."""
+    filtered = [r for r in results if r[2] >= min_score]
+    return filtered[:top_k]
+
+
 def search_multi(
     query: str,
     model: ColQwen2_5,
