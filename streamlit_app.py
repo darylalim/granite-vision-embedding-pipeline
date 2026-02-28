@@ -137,7 +137,9 @@ def search_multi(
 # UI
 st.set_page_config(page_title="Embedding Pipeline", layout="centered")
 st.title("Embedding Pipeline")
-st.write("Generate vector embeddings from PDF documents with ColNomic Embed Multimodal.")
+st.write(
+    "Generate vector embeddings from PDF documents with ColNomic Embed Multimodal."
+)
 
 uploaded_files = st.file_uploader(
     "Upload files", type=["pdf"], accept_multiple_files=True
@@ -289,6 +291,12 @@ if uploaded_files:
         )
         selected_file_id = filter_file_ids[filter_idx]
 
+        col_topk, col_minscore = st.columns(2)
+        top_k = col_topk.number_input("Top K", min_value=1, max_value=100, value=5)
+        min_score = col_minscore.number_input(
+            "Min score", min_value=0.0, value=0.0, step=0.1
+        )
+
         query = st.text_input("Text query")
         if st.button("Search"):
             if not query:
@@ -296,12 +304,15 @@ if uploaded_files:
             else:
                 try:
                     model, processor = load_model(device)
-                    st.session_state.search_results = search_multi(
+                    raw_results = search_multi(
                         query,
                         model,
                         processor,
                         all_results,
                         filter_file_id=selected_file_id,
+                    )
+                    st.session_state.search_results = filter_results(
+                        raw_results, top_k=top_k, min_score=min_score
                     )
                 except (OSError, RuntimeError, ValueError) as e:
                     st.error(str(e))
@@ -321,5 +332,7 @@ if uploaded_files:
                         ),
                         width="stretch",
                     )
+            else:
+                st.info("No results above the score threshold.")
 
 st.caption(f"Device: {device.upper()}")
