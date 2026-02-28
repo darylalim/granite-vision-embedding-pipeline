@@ -5,10 +5,10 @@ from typing import TypedDict
 import fitz
 import streamlit as st
 import torch
-from colpali_engine.models import BiQwen2_5, BiQwen2_5_Processor
+from colpali_engine.models import ColQwen2_5, ColQwen2_5_Processor
 from PIL import Image
 
-MODEL_ID = "nomic-ai/nomic-embed-multimodal-3b"
+MODEL_ID = "nomic-ai/colnomic-embed-multimodal-3b"
 DPI_OPTIONS = {"Low (72)": 72, "Medium (150)": 150, "High (300)": 300}
 
 
@@ -32,12 +32,12 @@ def get_device() -> str:
 
 
 @st.cache_resource
-def load_model(device: str) -> tuple[BiQwen2_5, BiQwen2_5_Processor]:
+def load_model(device: str) -> tuple[ColQwen2_5, ColQwen2_5_Processor]:
     """Load embedding model and processor."""
-    model = BiQwen2_5.from_pretrained(
+    model = ColQwen2_5.from_pretrained(
         MODEL_ID, torch_dtype=torch.bfloat16, device_map=device
     ).eval()
-    processor = BiQwen2_5_Processor.from_pretrained(MODEL_ID)
+    processor = ColQwen2_5_Processor.from_pretrained(MODEL_ID)
     return model, processor
 
 
@@ -57,7 +57,7 @@ def render_pages(data: bytes, dpi: int = 150) -> list[Image.Image]:
 
 
 def embed(
-    images: list[Image.Image], model: BiQwen2_5, processor: BiQwen2_5_Processor
+    images: list[Image.Image], model: ColQwen2_5, processor: ColQwen2_5_Processor
 ) -> torch.Tensor:
     """Generate per-page multi-vector embeddings from images."""
     batch = processor.process_images(images).to(model.device)
@@ -68,15 +68,15 @@ def embed(
 
 def search(
     query: str,
-    model: BiQwen2_5,
-    processor: BiQwen2_5_Processor,
+    model: ColQwen2_5,
+    processor: ColQwen2_5_Processor,
     image_embeddings: torch.Tensor,
 ) -> list[tuple[int, float]]:
     """Score a text query against image embeddings and return ranked results."""
-    batch = processor.process_texts([query]).to(model.device)
+    batch = processor.process_queries([query]).to(model.device)
     with torch.inference_mode():
         query_embedding = model(**batch)
-    scores = processor.score(
+    scores = processor.score_multi_vector(
         qs=[query_embedding[0]],
         ps=list(image_embeddings),
     )
@@ -98,8 +98,8 @@ def cleanup_stale_results(
 
 def search_multi(
     query: str,
-    model: BiQwen2_5,
-    processor: BiQwen2_5_Processor,
+    model: ColQwen2_5,
+    processor: ColQwen2_5_Processor,
     results: dict[str, EmbedResults],
     filter_file_id: str | None = None,
 ) -> list[tuple[str, int, float]]:
@@ -109,12 +109,12 @@ def search_multi(
         if filter_file_id is not None
         else results
     )
-    batch = processor.process_texts([query]).to(model.device)
+    batch = processor.process_queries([query]).to(model.device)
     with torch.inference_mode():
         query_embedding = model(**batch)
     ranked: list[tuple[str, int, float]] = []
     for file_id, r in docs.items():
-        scores = processor.score(
+        scores = processor.score_multi_vector(
             qs=[query_embedding[0]],
             ps=list(r["page_embeddings"]),
         )
@@ -127,7 +127,7 @@ def search_multi(
 # UI
 st.set_page_config(page_title="Embedding Pipeline", layout="centered")
 st.title("Embedding Pipeline")
-st.write("Generate vector embeddings from PDF documents with Nomic Embed Multimodal.")
+st.write("Generate vector embeddings from PDF documents with ColNomic Embed Multimodal.")
 
 uploaded_files = st.file_uploader(
     "Upload files", type=["pdf"], accept_multiple_files=True
