@@ -7,6 +7,7 @@ from pytest import approx
 
 from streamlit_app import (
     DPI_OPTIONS,
+    IMAGE_EXTENSIONS,
     EmbedResults,
     cleanup_stale_results,
     embed,
@@ -49,6 +50,11 @@ class TestDpiOptions:
     def test_labels_match_values(self) -> None:
         for label, value in DPI_OPTIONS.items():
             assert str(value) in label
+
+
+class TestImageExtensions:
+    def test_contains_expected_types(self) -> None:
+        assert IMAGE_EXTENSIONS == {"png", "jpg", "jpeg", "webp"}
 
 
 class TestGetDevice:

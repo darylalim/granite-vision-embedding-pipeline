@@ -6,10 +6,11 @@ import fitz
 import streamlit as st
 import torch
 from colpali_engine.models import ColQwen2_5, ColQwen2_5_Processor
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 MODEL_ID = "nomic-ai/colnomic-embed-multimodal-3b"
 DPI_OPTIONS = {"Low (72)": 72, "Medium (150)": 150, "High (300)": 300}
+IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 
 
 class EmbedResults(TypedDict):
@@ -138,11 +139,13 @@ def search_multi(
 st.set_page_config(page_title="Embedding Pipeline", layout="centered")
 st.title("Embedding Pipeline")
 st.write(
-    "Generate vector embeddings from PDF documents with ColNomic Embed Multimodal."
+    "Generate vector embeddings from PDFs and images with ColNomic Embed Multimodal."
 )
 
 uploaded_files = st.file_uploader(
-    "Upload files", type=["pdf"], accept_multiple_files=True
+    "Upload files",
+    type=["pdf", *IMAGE_EXTENSIONS],
+    accept_multiple_files=True,
 )
 
 device = get_device()
@@ -192,10 +195,19 @@ if uploaded_files:
                     )
                     try:
                         total_start = time.perf_counter_ns()
-                        pages = render_pages(f.read(), dpi=dpi)
-                        if not pages:
-                            st.error(f"{f.name}: PDF contains no pages to embed.")
-                            continue
+                        ext = f.name.rsplit(".", 1)[-1].lower()
+                        if ext in IMAGE_EXTENSIONS:
+                            try:
+                                image = Image.open(f).convert("RGB")
+                            except (UnidentifiedImageError, OSError) as e:
+                                st.error(f"{f.name}: {e}")
+                                continue
+                            pages = [image]
+                        else:
+                            pages = render_pages(f.read(), dpi=dpi)
+                            if not pages:
+                                st.error(f"{f.name}: PDF contains no pages to embed.")
+                                continue
                         page_embeddings = embed(pages, model, processor)
                         total_duration = time.perf_counter_ns() - total_start
 
