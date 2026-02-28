@@ -1,13 +1,14 @@
 # Embedding Pipeline
 
-Streamlit web app for generating vector embeddings from multiple PDF documents and searching over them using Nomic's [ColNomic Embed Multimodal 3B](https://huggingface.co/nomic-ai/colnomic-embed-multimodal-3b) model.
+Streamlit web app for generating vector embeddings from PDF documents and images and searching over them using Nomic's [ColNomic Embed Multimodal 3B](https://huggingface.co/nomic-ai/colnomic-embed-multimodal-3b) model.
 
 ## Features
 
-- Multi-PDF upload with batch or incremental embedding
+- Multi-PDF and image upload (PNG, JPG, JPEG, WebP) with batch or incremental embedding
 - PDF page rendering at configurable DPI (72, 150, 300) via [PyMuPDF](https://pymupdf.readthedocs.io/)
 - Multi-vector embeddings with [ColNomic Embed Multimodal 3B](https://huggingface.co/nomic-ai/colnomic-embed-multimodal-3b)
-- Cross-document text search with optional per-document filtering
+- Cross-document text search with top-K and score threshold filtering
+- Optional per-document search filtering
 - Automatic device selection (MPS > CUDA > CPU)
 - Per-document and combined JSON downloads with embeddings, DPI, and timing
 

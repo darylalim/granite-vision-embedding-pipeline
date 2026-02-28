@@ -71,6 +71,7 @@ Multi-PDF/image upload → render PDF pages as images at configurable DPI (`pymu
 
 - `OSError`, `RuntimeError`, `ValueError` caught with `st.error()`
 - Empty or malformed PDFs raise `ValueError`
+- Corrupt or unreadable images caught via `UnidentifiedImageError` and `OSError`
 - Unexpected exceptions shown with `st.exception()`
 
 ### Session State
@@ -98,9 +99,12 @@ Text query scores against page embeddings across all documents via `search_multi
 
 ## Tests
 
-- `tests/test_app.py` — unit tests for `DPI_OPTIONS`, `get_device`, `render_pages`, `embed`, `search`, `cleanup_stale_results`, `search_multi`, `filter_results` (`TestFilterResults`), and `IMAGE_EXTENSIONS` (`TestImageExtensions`)
-- `tests/data/pdf/single_page.pdf` — single-page PDF fixture for `render_pages` tests
-- `tests/data/pdf/multi_page.pdf` — multi-page PDF fixture for `render_pages` tests
+- `tests/test_app.py` — unit tests: `TestDpiOptions`, `TestImageExtensions`, `TestLoadImage`, `TestGetDevice`, `TestRenderPages`, `TestEmbed`, `TestSearch`, `TestCleanupStaleResults`, `TestFilterResults`, `TestSearchMulti`
+- `tests/data/pdf/single_page.pdf` — single-page PDF fixture
+- `tests/data/pdf/multi_page.pdf` — multi-page PDF fixture (3 pages)
+- `tests/data/images/red.png` — PNG image fixture
+- `tests/data/images/blue.jpg` — JPG image fixture
+- `tests/data/images/green.webp` — WebP image fixture
 
 ## Resources
 
