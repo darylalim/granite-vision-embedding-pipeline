@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Streamlit web app for generating vector embeddings from PDF documents and searching over them using Nomic's [Embed Multimodal](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b) model.
+Streamlit web app for generating vector embeddings from PDF documents and images and searching over them using Nomic's [Embed Multimodal](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b) model.
 
 ## Setup
 
@@ -50,7 +50,7 @@ uv run streamlit run streamlit_app.py
 
 ### Pipeline
 
-Multi-PDF upload → render pages as images at configurable DPI (`pymupdf`) → embed images (`ColQwen2_5`) → download per-document or combined JSON / search pages by text query across all documents or filtered to one
+Multi-PDF/image upload → render PDF pages as images at configurable DPI (`pymupdf`) or accept images directly (PNG, JPG, JPEG, WebP) → embed images (`ColQwen2_5`) → download per-document or combined JSON / search pages by text query across all documents or filtered to one
 
 ### Performance
 
@@ -65,6 +65,7 @@ Multi-PDF upload → render pages as images at configurable DPI (`pymupdf`) → 
 
 - `MODEL_ID = "nomic-ai/colnomic-embed-multimodal-3b"`
 - `DPI_OPTIONS = {"Low (72)": 72, "Medium (150)": 150, "High (300)": 300}`
+- `IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}`
 
 ### Error Handling
 
@@ -89,7 +90,7 @@ Pre-computed JSON string cached in each `results[file_id]["json"]` at embed time
 
 ### Search
 
-Text query scores against page embeddings across all documents via `search_multi`, with an optional document filter (`st.selectbox`). Results display page image, document name, page number, and score. Search results persist as `st.session_state.search_results`, cleared on new embed.
+Text query scores against page embeddings across all documents via `search_multi`, with an optional document filter (`st.selectbox`). Results are post-processed by `filter_results` which applies a minimum score threshold then keeps only the top-K results. Top K and Min score are configurable via `st.number_input` widgets. Results display page image, document name, page number, and score. Search results persist as `st.session_state.search_results`, cleared on new embed.
 
 ### Metrics
 
@@ -97,7 +98,7 @@ Text query scores against page embeddings across all documents via `search_multi
 
 ## Tests
 
-- `tests/test_app.py` — unit tests for `DPI_OPTIONS`, `get_device`, `render_pages`, `embed`, `search`, `cleanup_stale_results`, and `search_multi`
+- `tests/test_app.py` — unit tests for `DPI_OPTIONS`, `get_device`, `render_pages`, `embed`, `search`, `cleanup_stale_results`, `search_multi`, `filter_results` (`TestFilterResults`), and `IMAGE_EXTENSIONS` (`TestImageExtensions`)
 - `tests/data/pdf/single_page.pdf` — single-page PDF fixture for `render_pages` tests
 - `tests/data/pdf/multi_page.pdf` — multi-page PDF fixture for `render_pages` tests
 
