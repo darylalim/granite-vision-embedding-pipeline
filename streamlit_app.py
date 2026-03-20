@@ -157,10 +157,10 @@ def search_multi(
 
 
 # UI
-st.set_page_config(page_title="Embedding Pipeline", layout="centered")
-st.title("Embedding Pipeline")
+st.set_page_config(page_title="Granite Vision Embedding Pipeline", layout="centered")
+st.title("Granite Vision Embedding Pipeline")
 st.write(
-    "Generate vector embeddings from PDFs and images with Granite Vision Embedding."
+    "Generate vector embeddings from PDFs and images with Granite Vision Embedding Pipeline."
 )
 
 uploaded_files = st.file_uploader(
