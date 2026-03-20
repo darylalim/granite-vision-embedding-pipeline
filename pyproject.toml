@@ -1,5 +1,5 @@
 [project]
-name = "embedding-pipeline"
+name = "granite-vision-embedding-pipeline"
 version = "0.1.0"
 description = "Streamlit web app for generating vector embeddings from PDF documents and images and searching over them using IBM Granite's Vision Embedding model."
 requires-python = ">=3.12"
