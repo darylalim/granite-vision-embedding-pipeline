@@ -1,159 +1,20 @@
 import json
 import time
-from typing import Any, Protocol, TypedDict
+from typing import Any
 
-import fitz
 import streamlit as st
-import torch
 from PIL import Image, UnidentifiedImageError
-from transformers import AutoModel, AutoProcessor
 
-MODEL_ID = "ibm-granite/granite-vision-3.3-2b-embedding"
-DPI_OPTIONS = {"Low (72)": 72, "Medium (150)": 150, "High (300)": 300}
-IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
-
-
-class EmbeddingProcessor(Protocol):
-    def process_images(self, images: list[Image.Image]) -> dict[str, Any]: ...
-    def process_queries(self, queries: list[str]) -> dict[str, Any]: ...
-    def score(
-        self, qs: torch.Tensor, ps: torch.Tensor, *, device: str
-    ) -> torch.Tensor: ...
-
-
-class EmbedResults(TypedDict):
-    file_id: str
-    pages: list[Image.Image]
-    page_embeddings: torch.Tensor
-    total_duration: int
-    file_stem: str
-    dpi: int
-    json: str
-
-
-def get_device() -> str:
-    """Detect best available device: MPS > CUDA > CPU."""
-    if torch.backends.mps.is_available():
-        return "mps"
-    if torch.cuda.is_available():
-        return "cuda"
-    return "cpu"
+from core.constants import DPI_OPTIONS, IMAGE_EXTENSIONS, MODEL_ID
+from core.embedding import embed, get_device, load_model
+from core.rendering import render_pages
+from core.search import filter_results, search_multi
 
 
 @st.cache_resource
-def load_model(device: str) -> tuple[Any, Any]:
-    """Load embedding model and processor."""
-    model = AutoModel.from_pretrained(
-        MODEL_ID,
-        torch_dtype=torch.float16,
-        device_map=device,
-        trust_remote_code=True,
-    ).eval()
-    processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-    return model, processor
-
-
-def render_pages(data: bytes, dpi: int = 150) -> list[Image.Image]:
-    """Render PDF pages as PIL Images."""
-    try:
-        scale = dpi / 72
-        matrix = fitz.Matrix(scale, scale)
-        with fitz.open(stream=data, filetype="pdf") as doc:
-            return [
-                Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                for page in doc
-                for pix in [page.get_pixmap(matrix=matrix)]
-            ]
-    except (fitz.FileDataError, fitz.EmptyFileError):
-        return []
-
-
-def embed(
-    images: list[Image.Image], model: torch.nn.Module, processor: EmbeddingProcessor
-) -> torch.Tensor:
-    """Generate per-page multi-vector embeddings from images."""
-    batch = processor.process_images(images)
-    batch = {
-        k: v.to(model.device) if isinstance(v, torch.Tensor) else v
-        for k, v in batch.items()
-    }
-    with torch.inference_mode():
-        embeddings = model(**batch)
-    return embeddings
-
-
-def search(
-    query: str,
-    model: torch.nn.Module,
-    processor: EmbeddingProcessor,
-    image_embeddings: torch.Tensor,
-) -> list[tuple[int, float]]:
-    """Score a text query against image embeddings and return ranked results."""
-    batch = processor.process_queries([query])
-    batch = {
-        k: v.to(model.device) if isinstance(v, torch.Tensor) else v
-        for k, v in batch.items()
-    }
-    with torch.inference_mode():
-        query_embedding = model(**batch)
-    scores = processor.score(
-        query_embedding, image_embeddings, device=str(model.device)
-    )
-    ranked = sorted(
-        [(i, scores[0][i].item()) for i in range(scores.shape[1])],
-        key=lambda x: x[1],
-        reverse=True,
-    )
-    return ranked
-
-
-def cleanup_stale_results(
-    current_file_ids: set[str], results: dict[str, EmbedResults]
-) -> None:
-    """Remove results for files no longer in the uploader."""
-    for file_id in set(results.keys()) - current_file_ids:
-        del results[file_id]
-
-
-def filter_results(
-    results: list[tuple[str, int, float]],
-    top_k: int = 5,
-    min_score: float = 0.0,
-) -> list[tuple[str, int, float]]:
-    """Apply score threshold then top-K to ranked search results."""
-    filtered = [r for r in results if r[2] >= min_score]
-    return filtered[:top_k]
-
-
-def search_multi(
-    query: str,
-    model: torch.nn.Module,
-    processor: EmbeddingProcessor,
-    results: dict[str, EmbedResults],
-    filter_file_id: str | None = None,
-) -> list[tuple[str, int, float]]:
-    """Score a text query across multiple documents and return ranked results."""
-    docs = (
-        {filter_file_id: results[filter_file_id]}
-        if filter_file_id is not None
-        else results
-    )
-    batch = processor.process_queries([query])
-    batch = {
-        k: v.to(model.device) if isinstance(v, torch.Tensor) else v
-        for k, v in batch.items()
-    }
-    with torch.inference_mode():
-        query_embedding = model(**batch)
-    ranked: list[tuple[str, int, float]] = []
-    for file_id, r in docs.items():
-        scores = processor.score(
-            query_embedding, r["page_embeddings"], device=str(model.device)
-        )
-        for page_idx in range(scores.shape[1]):
-            ranked.append((file_id, page_idx, scores[0][page_idx].item()))
-    ranked.sort(key=lambda x: x[2], reverse=True)
-    return ranked
+def cached_load_model(device: str) -> tuple:
+    """Cache-wrapped model loader for Streamlit."""
+    return load_model(device)
 
 
 # UI
@@ -181,9 +42,10 @@ if uploaded_files:
     # Clean up stale results for removed files
     if "results" in st.session_state:
         current_ids = {f.file_id for f in uploaded_files}
-        prev_count = len(st.session_state.results)
-        cleanup_stale_results(current_ids, st.session_state.results)
-        if len(st.session_state.results) < prev_count:
+        stale_ids = set(st.session_state.results.keys()) - current_ids
+        for stale_id in stale_ids:
+            del st.session_state.results[stale_id]
+        if stale_ids:
             st.session_state.pop("search_results", None)
         if not st.session_state.results:
             del st.session_state["results"]
@@ -205,8 +67,8 @@ if uploaded_files:
         if files_to_embed:
             try:
                 progress = st.progress(0.0, text="Loading model...")
-                model, processor = load_model(device)
-                results: dict[str, EmbedResults] = st.session_state.get("results", {})
+                model, processor = cached_load_model(device)
+                results: dict[str, Any] = st.session_state.get("results", {})
 
                 for i, f in enumerate(files_to_embed):
                     file_stem = f.name.rsplit(".", 1)[0]
@@ -266,7 +128,7 @@ if uploaded_files:
                 st.exception(e)
 
     if "results" in st.session_state and st.session_state.results:
-        all_results: dict[str, EmbedResults] = st.session_state.results
+        all_results: dict[str, Any] = st.session_state.results
 
         st.success(f"Embedded {len(all_results)} document(s).")
 
@@ -336,12 +198,15 @@ if uploaded_files:
                 st.warning("Enter a search query.")
             else:
                 try:
-                    model, processor = load_model(device)
+                    model, processor = cached_load_model(device)
+                    embeddings_map = {
+                        fid: r["page_embeddings"] for fid, r in all_results.items()
+                    }
                     raw_results = search_multi(
                         query,
                         model,
                         processor,
-                        all_results,
+                        embeddings_map,
                         filter_file_id=selected_file_id,
                     )
                     st.session_state.search_results = filter_results(
