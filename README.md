@@ -1,4 +1,4 @@
-# Embedding Pipeline
+# Granite Vision Embedding Pipeline
 
 Streamlit web app for generating vector embeddings from PDF documents and images and searching over them using IBM Granite's [Vision Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding) model.
 
