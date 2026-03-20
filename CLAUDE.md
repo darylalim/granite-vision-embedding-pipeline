@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Streamlit web app for generating vector embeddings from PDF documents and images and searching over them using Nomic's [Embed Multimodal](https://huggingface.co/nomic-ai/nomic-embed-multimodal-3b) model.
+Streamlit web app for generating vector embeddings from PDF documents and images and searching over them using IBM Granite's [Vision Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding) model.
 
 ## Setup
 
@@ -26,7 +26,7 @@ uv run streamlit run streamlit_app.py
 
 ## Dependencies
 
-- `colpali-engine` — multimodal embedding model (`ColQwen2_5`, `ColQwen2_5_Processor`)
+- `transformers` — Hugging Face model loading (`AutoModel`, `AutoProcessor`)
 - `pymupdf` — PDF page rendering
 - `torch` — tensor operations
 - `streamlit` — web user interface
@@ -46,24 +46,24 @@ uv run streamlit run streamlit_app.py
 
 ### Embedding Model
 
-[ColNomic Embed Multimodal 3B](https://huggingface.co/nomic-ai/colnomic-embed-multimodal-3b) — multi-vector vision-language embedding model
+[Granite Vision 3.3 2B Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding) — multi-vector vision-language embedding model (loaded via `trust_remote_code=True`)
 
 ### Pipeline
 
-Multi-PDF/image upload → render PDF pages as images at configurable DPI (`pymupdf`) or accept images directly (PNG, JPG, JPEG, WebP) → embed images (`ColQwen2_5`) → download per-document or combined JSON / search pages by text query across all documents or filtered to one
+Multi-PDF/image upload → render PDF pages as images at configurable DPI (`pymupdf`) or accept images directly (PNG, JPG, JPEG, WebP) → embed images (`AutoModel`) → download per-document or combined JSON / search pages by text query across all documents or filtered to one
 
 ### Performance
 
 - Best available device: MPS > CUDA > CPU
 - `@st.cache_resource` to cache model and processor
 - `torch.inference_mode()` for inference
-- `torch.bfloat16` for model precision
+- `torch.float16` for model precision
 - `time.perf_counter_ns()` for timing (nanoseconds)
 - JSON string pre-computed at embed time to avoid repeated `tolist()` on reruns
 
 ### Constants
 
-- `MODEL_ID = "nomic-ai/colnomic-embed-multimodal-3b"`
+- `MODEL_ID = "ibm-granite/granite-vision-3.3-2b-embedding"`
 - `DPI_OPTIONS = {"Low (72)": 72, "Medium (150)": 150, "High (300)": 300}`
 - `IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}`
 
@@ -108,5 +108,4 @@ Text query scores against page embeddings across all documents via `search_multi
 
 ## Resources
 
-- [Model Card](https://huggingface.co/nomic-ai/colnomic-embed-multimodal-3b)
-- [ColPali Engine](https://github.com/illuin-tech/colpali)
+- [Model Card](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding)
