@@ -1,16 +1,24 @@
 import json
 import time
-from typing import TypedDict
+from typing import Any, Protocol, TypedDict
 
 import fitz
 import streamlit as st
 import torch
-from colpali_engine.models import ColQwen2_5, ColQwen2_5_Processor
 from PIL import Image, UnidentifiedImageError
+from transformers import AutoModel, AutoProcessor
 
-MODEL_ID = "nomic-ai/colnomic-embed-multimodal-3b"
+MODEL_ID = "ibm-granite/granite-vision-3.3-2b-embedding"
 DPI_OPTIONS = {"Low (72)": 72, "Medium (150)": 150, "High (300)": 300}
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
+
+
+class EmbeddingProcessor(Protocol):
+    def process_images(self, images: list[Image.Image]) -> dict[str, Any]: ...
+    def process_queries(self, queries: list[str]) -> dict[str, Any]: ...
+    def score(
+        self, qs: torch.Tensor, ps: torch.Tensor, *, device: str
+    ) -> torch.Tensor: ...
 
 
 class EmbedResults(TypedDict):
@@ -33,12 +41,15 @@ def get_device() -> str:
 
 
 @st.cache_resource
-def load_model(device: str) -> tuple[ColQwen2_5, ColQwen2_5_Processor]:
+def load_model(device: str) -> tuple[Any, Any]:
     """Load embedding model and processor."""
-    model = ColQwen2_5.from_pretrained(
-        MODEL_ID, torch_dtype=torch.bfloat16, device_map=device
+    model = AutoModel.from_pretrained(
+        MODEL_ID,
+        torch_dtype=torch.float16,
+        device_map=device,
+        trust_remote_code=True,
     ).eval()
-    processor = ColQwen2_5_Processor.from_pretrained(MODEL_ID)
+    processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
     return model, processor
 
 
@@ -58,10 +69,14 @@ def render_pages(data: bytes, dpi: int = 150) -> list[Image.Image]:
 
 
 def embed(
-    images: list[Image.Image], model: ColQwen2_5, processor: ColQwen2_5_Processor
+    images: list[Image.Image], model: torch.nn.Module, processor: EmbeddingProcessor
 ) -> torch.Tensor:
     """Generate per-page multi-vector embeddings from images."""
-    batch = processor.process_images(images).to(model.device)
+    batch = processor.process_images(images)
+    batch = {
+        k: v.to(model.device) if isinstance(v, torch.Tensor) else v
+        for k, v in batch.items()
+    }
     with torch.inference_mode():
         embeddings = model(**batch)
     return embeddings
@@ -69,20 +84,23 @@ def embed(
 
 def search(
     query: str,
-    model: ColQwen2_5,
-    processor: ColQwen2_5_Processor,
+    model: torch.nn.Module,
+    processor: EmbeddingProcessor,
     image_embeddings: torch.Tensor,
 ) -> list[tuple[int, float]]:
     """Score a text query against image embeddings and return ranked results."""
-    batch = processor.process_queries([query]).to(model.device)
+    batch = processor.process_queries([query])
+    batch = {
+        k: v.to(model.device) if isinstance(v, torch.Tensor) else v
+        for k, v in batch.items()
+    }
     with torch.inference_mode():
         query_embedding = model(**batch)
-    scores = processor.score_multi_vector(
-        qs=[query_embedding[0]],
-        ps=list(image_embeddings),
+    scores = processor.score(
+        query_embedding, image_embeddings, device=str(model.device)
     )
     ranked = sorted(
-        [(i, score.item()) for i, score in enumerate(scores[0])],
+        [(i, scores[0][i].item()) for i in range(scores.shape[1])],
         key=lambda x: x[1],
         reverse=True,
     )
@@ -109,8 +127,8 @@ def filter_results(
 
 def search_multi(
     query: str,
-    model: ColQwen2_5,
-    processor: ColQwen2_5_Processor,
+    model: torch.nn.Module,
+    processor: EmbeddingProcessor,
     results: dict[str, EmbedResults],
     filter_file_id: str | None = None,
 ) -> list[tuple[str, int, float]]:
@@ -120,17 +138,20 @@ def search_multi(
         if filter_file_id is not None
         else results
     )
-    batch = processor.process_queries([query]).to(model.device)
+    batch = processor.process_queries([query])
+    batch = {
+        k: v.to(model.device) if isinstance(v, torch.Tensor) else v
+        for k, v in batch.items()
+    }
     with torch.inference_mode():
         query_embedding = model(**batch)
     ranked: list[tuple[str, int, float]] = []
     for file_id, r in docs.items():
-        scores = processor.score_multi_vector(
-            qs=[query_embedding[0]],
-            ps=list(r["page_embeddings"]),
+        scores = processor.score(
+            query_embedding, r["page_embeddings"], device=str(model.device)
         )
-        for page_idx, score in enumerate(scores[0]):
-            ranked.append((file_id, page_idx, score.item()))
+        for page_idx in range(scores.shape[1]):
+            ranked.append((file_id, page_idx, scores[0][page_idx].item()))
     ranked.sort(key=lambda x: x[2], reverse=True)
     return ranked
 
@@ -139,7 +160,7 @@ def search_multi(
 st.set_page_config(page_title="Embedding Pipeline", layout="centered")
 st.title("Embedding Pipeline")
 st.write(
-    "Generate vector embeddings from PDFs and images with ColNomic Embed Multimodal."
+    "Generate vector embeddings from PDFs and images with Granite Vision Embedding."
 )
 
 uploaded_files = st.file_uploader(
