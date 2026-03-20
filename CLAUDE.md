@@ -1,4 +1,4 @@
-# CLAUDE.md
+# Granite Vision Embedding Pipeline
 
 ## Project Overview
 
