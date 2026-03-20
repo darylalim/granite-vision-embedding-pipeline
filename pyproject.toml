@@ -4,10 +4,14 @@ version = "0.1.0"
 description = "Streamlit web app for generating vector embeddings from PDF documents and images and searching over them using IBM Granite's Vision Embedding model."
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.115",
+    "httpx>=0.28",
     "pymupdf>=1.25.0",
+    "python-multipart>=0.0.18",
     "streamlit==1.52.2",
     "torch==2.9.1",
     "transformers>=4.50,<6",
+    "uvicorn>=0.34",
 ]
 
 [dependency-groups]
