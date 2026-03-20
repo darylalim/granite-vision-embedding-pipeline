@@ -55,8 +55,8 @@ granite-vision-embedding-pipeline/
 
 - `core/` holds pure logic extracted from the current `streamlit_app.py` — no Streamlit or FastAPI dependencies, testable in isolation.
 - `core/constants.py` holds `MODEL_ID`, `DPI_OPTIONS`, `IMAGE_EXTENSIONS`.
-- `core/types.py` holds `EmbeddingProcessor` protocol and `EmbedResults` TypedDict.
-- `core/embedding.py` holds `get_device`, `load_model` (without `@st.cache_resource`), `embed`, and `load_image` (extracted from inline image loading logic).
+- `core/types.py` holds `EmbeddingProcessor` protocol. `EmbedResults` TypedDict is removed — replaced by Pydantic models in `api/models.py` and database rows. `cleanup_stale_results` is also removed — job lifecycle is managed by the API.
+- `core/embedding.py` holds `get_device`, `load_model` (without `@st.cache_resource`), `embed`, and `load_image`. `load_image(path: Path) -> Image.Image` opens a file, converts to RGB, and lets `UnidentifiedImageError`/`OSError` propagate (the worker catches them and marks the job as failed).
 - `core/search.py` holds `search_multi` and `filter_results`. The single-document `search` function is dropped — `search_multi` covers that case with `filter_file_id`.
 - `api/` holds everything backend — routes, database, worker.
 - `streamlit_app.py` stays as the entry point but becomes a thin API client.
@@ -85,7 +85,7 @@ CREATE TABLE jobs (
 );
 ```
 
-SQLite opened with `journal_mode=WAL` and `busy_timeout=5000` for safe concurrent access between the main thread (API inserts/deletes) and worker thread (status updates).
+SQLite opened with `journal_mode=WAL` and `busy_timeout=5000` for safe concurrent access between the main thread (API inserts/deletes) and worker thread (status updates). Schema created via `CREATE TABLE IF NOT EXISTS` at connection initialization during FastAPI lifespan startup. Schema migrations are out of scope for v1.
 
 ### Job Lifecycle
 
@@ -114,10 +114,11 @@ POST   /search            Text query + top_k + min_score + optional file filter 
 GET    /health            Worker status, job queue depth, device info
 ```
 
-- `POST /jobs` accepts `multipart/form-data` (file + DPI param). Validates file type against `IMAGE_EXTENSIONS` + `pdf`. Returns `{job_id, status: "pending"}`.
+- `POST /jobs` accepts `multipart/form-data` (file + DPI param). Validates file type against `IMAGE_EXTENSIONS` + `pdf`. Rejects files larger than 50 MB. Returns `{job_id, status: "pending"}`.
 - `GET /jobs` supports `?status=pending,processing` for filtering. Returns list sorted by `created_at`.
-- `POST /search` loads `.pt` files for completed jobs into memory, runs `search_multi`, applies `filter_results`, returns results as JSON. The worker thread holds an in-memory cache of loaded tensors (keyed by job ID) to avoid reloading `.pt` files on every search. Cache entries are evicted when jobs are deleted.
-- `DELETE /jobs/{id}` removes the upload file, result files (JSON + .pt), database row, and cache entry. Only allowed for `pending`, `completed`, or `failed` jobs — not `processing`.
+- `POST /search` enqueues a search request to the worker thread (see Worker Design) and awaits the result. Returns ranked results as JSON.
+- `DELETE /jobs/{id}` removes the upload file, result files (JSON + .pt) using `Path.unlink(missing_ok=True)` for paths that may be NULL (pending/failed jobs), database row, and cache entry. Only allowed for `pending`, `completed`, or `failed` jobs — not `processing` (returns 409).
+- Error responses use FastAPI's default `HTTPException` format: `{"detail": "message"}` with status codes 400 (validation), 404 (not found), 409 (state conflict).
 
 ## Worker Design
 
@@ -129,14 +130,17 @@ The worker runs as a **background thread** started during FastAPI's lifespan. It
 
 **Job processing loop:**
 1. Poll SQLite for the next `pending` job (oldest `created_at`), sleeping 1 second between polls when idle.
-2. Set job to `processing`.
-3. Read file from `uploads/`, render pages if PDF or load image via `load_image`, embed, write JSON + `.pt` to `results/`.
-4. Update job to `completed` with metadata, or `failed` with error.
-5. Loop back to step 1.
+2. Between polls, check the search request queue and process any pending search requests before polling for the next job.
+3. Set job to `processing`.
+4. Read file from `uploads/`, render pages if PDF or load image via `load_image`, embed, write JSON + `.pt` to `results/`.
+5. Update job to `completed` with metadata, or `failed` with error.
+6. Loop back to step 1.
 
-**Search:** Search runs on the worker thread (via a thread-safe queue or direct method call) to reuse the loaded model. The worker maintains an in-memory dict of `{job_id: torch.Tensor}` for completed job embeddings. Tensors are loaded from `.pt` files on first search access and cached.
+**Search threading model:** Search requests are enqueued to the worker thread via a `queue.Queue` of `(search_params, concurrent.futures.Future)` tuples. The API route handler creates a `Future`, puts the request on the queue, and awaits the result (via `asyncio.wrap_future`). The worker thread checks this queue between job polling cycles and during idle waits (step 2 above). This ensures the model is never accessed concurrently from two threads — all model operations (embedding and search) are serialized on the worker thread. Trade-off: search requests block while a job is processing (potentially minutes for large documents). This is acceptable for a local tool; for lower latency, a future version could checkpoint between pages.
 
-**Startup recovery:** On startup, any jobs left as `processing` are reset to `pending`.
+**Tensor cache:** The worker maintains an in-memory LRU cache of `{job_id: torch.Tensor}` for completed job embeddings, with a maximum of 500 entries. Tensors are loaded from `.pt` files on first search access and cached. Entries are evicted LRU-first when the cache is full, and explicitly removed when jobs are deleted. Evicted entries can be reloaded from `.pt` files on demand.
+
+**Startup recovery:** The first operation in the worker thread's startup, before the first poll cycle, is resetting any jobs left as `processing` to `pending`.
 
 **Shutdown:** FastAPI lifespan sets a stop event; the worker thread finishes its current job and exits.
 
@@ -187,10 +191,9 @@ All tests use existing mock helpers (with updated imports) and test fixtures.
 ## Dependencies
 
 **New runtime:**
-- `fastapi` — API framework
+- `fastapi` — API framework (includes `python-multipart` for file uploads)
 - `uvicorn` — ASGI server
 - `httpx` — sync HTTP client for Streamlit → API communication
-- `python-multipart` — file upload handling in FastAPI
 
 **Running:**
 ```bash
@@ -214,7 +217,7 @@ uv run streamlit run streamlit_app.py
 
 After implementation, update:
 - `CLAUDE.md` — new architecture section, new commands for running both servers, updated test file list, new dependencies.
-- `pyproject.toml` — add `fastapi`, `uvicorn`, `httpx`, `python-multipart` to dependencies.
+- `pyproject.toml` — add `fastapi`, `uvicorn`, `httpx` to dependencies.
 - `README.md` — updated setup instructions for two-process startup.
 
 ## Migration Notes
