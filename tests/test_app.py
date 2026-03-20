@@ -25,6 +25,29 @@ PDF_DATA_DIR = Path(__file__).parent / "data" / "pdf"
 IMAGE_DATA_DIR = Path(__file__).parent / "data" / "images"
 
 
+def _make_mock_model(return_value: torch.Tensor) -> MagicMock:
+    model = MagicMock()
+    model.device = "cpu"
+    model.return_value = return_value
+    return model
+
+
+def _make_image_processor() -> MagicMock:
+    mock_val = MagicMock(spec=torch.Tensor)
+    mock_val.to.return_value = mock_val
+    processor = MagicMock()
+    processor.process_images.return_value = {"pixel_values": mock_val}
+    return processor
+
+
+def _make_query_processor() -> MagicMock:
+    mock_val = MagicMock(spec=torch.Tensor)
+    mock_val.to.return_value = mock_val
+    processor = MagicMock()
+    processor.process_queries.return_value = {"input_ids": mock_val}
+    return processor
+
+
 def _make_result(
     file_id: str,
     file_stem: str,
@@ -78,14 +101,8 @@ class TestLoadImage:
         assert img.size == (64, 64)
 
     def test_embed_accepts_image_fixture(self) -> None:
-        mock_processor = MagicMock()
-        mock_batch = MagicMock()
-        mock_batch.to.return_value = mock_batch
-        mock_processor.process_images.return_value = mock_batch
-
-        mock_model = MagicMock()
-        mock_model.device = "cpu"
-        mock_model.return_value = torch.randn(1, 4, 128)
+        mock_processor = _make_image_processor()
+        mock_model = _make_mock_model(torch.randn(1, 4, 128))
 
         img = Image.open(IMAGE_DATA_DIR / "red.png").convert("RGB")
         result = embed([img], mock_model, mock_processor)
@@ -165,14 +182,10 @@ class TestEmbed:
         num_patches = 4
         embedding_dim = 128
 
-        mock_processor = MagicMock()
-        mock_batch = MagicMock()
-        mock_batch.to.return_value = mock_batch
-        mock_processor.process_images.return_value = mock_batch
-
-        mock_model = MagicMock()
-        mock_model.device = "cpu"
-        mock_model.return_value = torch.randn(num_pages, num_patches, embedding_dim)
+        mock_processor = _make_image_processor()
+        mock_model = _make_mock_model(
+            torch.randn(num_pages, num_patches, embedding_dim)
+        )
 
         images = [Image.new("RGB", (64, 64)) for _ in range(num_pages)]
         embeddings = embed(images, mock_model, mock_processor)
@@ -181,39 +194,25 @@ class TestEmbed:
         assert embeddings.shape == (num_pages, num_patches, embedding_dim)
 
     def test_calls_process_images(self) -> None:
-        mock_processor = MagicMock()
-        mock_batch = MagicMock()
-        mock_batch.to.return_value = mock_batch
-        mock_processor.process_images.return_value = mock_batch
-
-        mock_model = MagicMock()
-        mock_model.device = "cpu"
-        mock_model.return_value = torch.randn(1, 4, 128)
+        mock_processor = _make_image_processor()
+        mock_model = _make_mock_model(torch.randn(1, 4, 128))
 
         images = [Image.new("RGB", (64, 64))]
         embed(images, mock_model, mock_processor)
 
         mock_processor.process_images.assert_called_once_with(images)
-        mock_batch.to.assert_called_once_with("cpu")
+        mock_processor.process_images.return_value[
+            "pixel_values"
+        ].to.assert_called_once_with("cpu")
 
 
 class TestSearch:
     def test_returns_ranked_results(self) -> None:
-        mock_processor = MagicMock()
-        mock_batch = MagicMock()
-        mock_batch.to.return_value = mock_batch
-        mock_processor.process_queries.return_value = mock_batch
-
-        query_embedding = torch.tensor([[0.1, 0.2, 0.3]])
-        mock_model = MagicMock()
-        mock_model.device = "cpu"
-        mock_model.return_value = query_embedding
-
-        scores = torch.tensor([[0.5, 0.9, 0.2]])
-        mock_processor.score_multi_vector.return_value = scores
+        mock_processor = _make_query_processor()
+        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
+        mock_processor.score.return_value = torch.tensor([[0.5, 0.9, 0.2]])
 
         image_embeddings = torch.randn(3, 128)
-
         results = search("test query", mock_model, mock_processor, image_embeddings)
 
         assert len(results) == 3
@@ -222,27 +221,19 @@ class TestSearch:
         assert results[2] == (2, approx(0.2))
         mock_processor.process_queries.assert_called_once_with(["test query"])
 
-    def test_calls_process_queries_and_score_multi_vector(self) -> None:
-        mock_processor = MagicMock()
-        mock_batch = MagicMock()
-        mock_batch.to.return_value = mock_batch
-        mock_processor.process_queries.return_value = mock_batch
-
-        query_embedding = torch.tensor([[0.1, 0.2, 0.3]])
-        mock_model = MagicMock()
-        mock_model.device = "cpu"
-        mock_model.return_value = query_embedding
-
-        scores = torch.tensor([[0.5, 0.9]])
-        mock_processor.score_multi_vector.return_value = scores
+    def test_calls_process_queries_and_score(self) -> None:
+        mock_processor = _make_query_processor()
+        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
+        mock_processor.score.return_value = torch.tensor([[0.5, 0.9]])
 
         image_embeddings = torch.randn(2, 128)
-
         search("find charts", mock_model, mock_processor, image_embeddings)
 
         mock_processor.process_queries.assert_called_once_with(["find charts"])
-        mock_batch.to.assert_called_once_with("cpu")
-        mock_processor.score_multi_vector.assert_called_once()
+        mock_processor.process_queries.return_value[
+            "input_ids"
+        ].to.assert_called_once_with("cpu")
+        mock_processor.score.assert_called_once()
 
 
 class TestCleanupStaleResults:
@@ -322,18 +313,11 @@ class TestFilterResults:
 
 class TestSearchMulti:
     def test_returns_cross_document_ranked_results(self) -> None:
-        mock_processor = MagicMock()
-        mock_batch = MagicMock()
-        mock_batch.to.return_value = mock_batch
-        mock_processor.process_queries.return_value = mock_batch
-
-        query_embedding = torch.tensor([[0.1, 0.2, 0.3]])
-        mock_model = MagicMock()
-        mock_model.device = "cpu"
-        mock_model.return_value = query_embedding
+        mock_processor = _make_query_processor()
+        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
 
         # Doc A: 2 pages scoring [0.3, 0.8], Doc B: 1 page scoring [0.6]
-        mock_processor.score_multi_vector.side_effect = [
+        mock_processor.score.side_effect = [
             torch.tensor([[0.3, 0.8]]),
             torch.tensor([[0.6]]),
         ]
@@ -355,17 +339,9 @@ class TestSearchMulti:
         assert ranked[2] == ("id_a", 0, approx(0.3))
 
     def test_filters_to_single_document(self) -> None:
-        mock_processor = MagicMock()
-        mock_batch = MagicMock()
-        mock_batch.to.return_value = mock_batch
-        mock_processor.process_queries.return_value = mock_batch
-
-        query_embedding = torch.tensor([[0.1, 0.2, 0.3]])
-        mock_model = MagicMock()
-        mock_model.device = "cpu"
-        mock_model.return_value = query_embedding
-
-        mock_processor.score_multi_vector.return_value = torch.tensor([[0.5]])
+        mock_processor = _make_query_processor()
+        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
+        mock_processor.score.return_value = torch.tensor([[0.5]])
 
         results: dict[str, EmbedResults] = {
             "id_a": _make_result(
@@ -382,20 +358,12 @@ class TestSearchMulti:
 
         assert len(ranked) == 1
         assert ranked[0][0] == "id_b"
-        assert mock_processor.score_multi_vector.call_count == 1
+        assert mock_processor.score.call_count == 1
 
     def test_encodes_query_once_for_multiple_docs(self) -> None:
-        mock_processor = MagicMock()
-        mock_batch = MagicMock()
-        mock_batch.to.return_value = mock_batch
-        mock_processor.process_queries.return_value = mock_batch
-
-        query_embedding = torch.tensor([[0.1, 0.2, 0.3]])
-        mock_model = MagicMock()
-        mock_model.device = "cpu"
-        mock_model.return_value = query_embedding
-
-        mock_processor.score_multi_vector.side_effect = [
+        mock_processor = _make_query_processor()
+        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
+        mock_processor.score.side_effect = [
             torch.tensor([[0.3]]),
             torch.tensor([[0.6]]),
         ]
