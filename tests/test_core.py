@@ -6,7 +6,7 @@ import torch
 from PIL import Image, UnidentifiedImageError
 from pytest import approx
 
-from core.constants import DPI_OPTIONS, IMAGE_EXTENSIONS
+from core.constants import DPI_OPTIONS, IMAGE_EXTENSIONS, MAX_UPLOAD_BYTES
 from core.embedding import embed, get_device, load_image
 from core.rendering import render_pages
 from core.search import filter_results, search_multi
@@ -53,6 +53,11 @@ class TestDpiOptions:
 class TestImageExtensions:
     def test_contains_expected_types(self) -> None:
         assert IMAGE_EXTENSIONS == {"png", "jpg", "jpeg", "webp"}
+
+
+class TestMaxUploadBytes:
+    def test_equals_50_mb(self) -> None:
+        assert MAX_UPLOAD_BYTES == 50 * 1024 * 1024
 
 
 class TestLoadImage:
@@ -223,6 +228,13 @@ class TestFilterResults:
         assert len(filtered) == 5
         assert filtered[0][2] == approx(0.9)
 
+    def test_top_k_zero_returns_empty(self) -> None:
+        results: list[tuple[str, int, float]] = [
+            ("id_a", 0, 0.9),
+            ("id_b", 0, 0.8),
+        ]
+        assert filter_results(results, top_k=0) == []
+
 
 class TestSearchMulti:
     def test_returns_cross_document_ranked_results(self) -> None:
@@ -282,3 +294,11 @@ class TestSearchMulti:
 
         mock_processor.process_queries.assert_called_once_with(["test"])
         assert mock_model.call_count == 1
+
+    def test_returns_empty_for_empty_embeddings(self) -> None:
+        mock_processor = _make_query_processor()
+        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
+
+        result = search_multi("test query", mock_model, mock_processor, {})
+
+        assert result == []

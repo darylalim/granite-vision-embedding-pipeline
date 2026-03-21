@@ -109,6 +109,68 @@ class TestProcessJob:
         assert job["page_count"] == 1
 
     @patch("api.worker.load_model")
+    def test_marks_empty_pdf_as_failed(
+        self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
+    ) -> None:
+        uploads, results = dirs
+        mock_model = _make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = _make_mock_processor()
+        mock_load.return_value = (mock_model, mock_processor)
+
+        upload_path = uploads / "empty.pdf"
+        upload_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+        job_id = create_job(
+            db,
+            file_name="empty.pdf",
+            file_stem="empty",
+            file_path=str(upload_path),
+            file_type="pdf",
+            dpi=150,
+        )
+
+        worker = EmbeddingWorker(db, uploads_dir=uploads, results_dir=results)
+        worker.process_job(get_job(db, job_id))
+
+        job = get_job(db, job_id)
+        assert job["status"] == "failed"
+        assert job["error"] is not None
+        assert "no pages" in job["error"].lower()
+
+    @patch("api.worker.load_model")
+    def test_result_json_contains_expected_fields(
+        self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
+    ) -> None:
+        import json
+
+        uploads, results = dirs
+        mock_model = _make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = _make_mock_processor()
+        mock_load.return_value = (mock_model, mock_processor)
+
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        upload_path = uploads / "test.pdf"
+        upload_path.write_bytes(pdf_data)
+
+        job_id = create_job(
+            db,
+            file_name="test.pdf",
+            file_stem="test",
+            file_path=str(upload_path),
+            file_type="pdf",
+            dpi=150,
+        )
+
+        worker = EmbeddingWorker(db, uploads_dir=uploads, results_dir=results)
+        worker.process_job(get_job(db, job_id))
+
+        job = get_job(db, job_id)
+        assert job["status"] == "completed"
+        result_data = json.loads(Path(job["result_path"]).read_text())
+        for field in ("file_name", "model", "dpi", "embeddings", "total_duration", "page_count"):
+            assert field in result_data
+
+    @patch("api.worker.load_model")
     def test_marks_corrupt_file_as_failed(
         self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
     ) -> None:
@@ -201,6 +263,44 @@ class TestTensorCache:
         worker._tensor_cache["a"] = torch.randn(1, 4, 128)
         worker.evict_cache("a")
         assert "a" not in worker._tensor_cache
+
+    @patch("api.worker.load_model")
+    def test_get_or_load_tensor_loads_from_file(
+        self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
+    ) -> None:
+        uploads, results = dirs
+        mock_model = _make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = _make_mock_processor()
+        mock_load.return_value = (mock_model, mock_processor)
+
+        # Create a completed job with a .pt file
+        job_id = create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path=str(uploads / "a.pdf"),
+            file_type="pdf",
+            dpi=150,
+        )
+        saved_tensor = torch.randn(1, 4, 128)
+        tensor_path = results / f"{job_id}.pt"
+        torch.save(saved_tensor, tensor_path)
+        update_job(
+            db,
+            job_id,
+            status="completed",
+            page_count=1,
+            duration_ns=100,
+            result_path=str(results / f"{job_id}.json"),
+            tensor_path=str(tensor_path),
+        )
+
+        worker = EmbeddingWorker(db, uploads_dir=uploads, results_dir=results)
+        tensor = worker._get_or_load_tensor(job_id)
+
+        assert tensor is not None
+        assert tensor.shape == saved_tensor.shape
+        assert job_id in worker._tensor_cache
 
 
 class TestSearchDispatch:

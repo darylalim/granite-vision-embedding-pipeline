@@ -89,6 +89,20 @@ class TestUploadJob:
         )
         assert resp.status_code == 400
 
+    def test_upload_stores_dpi(self, client: TestClient) -> None:
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        create_resp = client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "300"},
+        )
+        assert create_resp.status_code == 201
+        job_id = create_resp.json()["job_id"]
+
+        resp = client.get(f"/jobs/{job_id}")
+        assert resp.status_code == 200
+        assert resp.json()["dpi"] == 300
+
 
 class TestListJobs:
     def test_list_empty(self, client: TestClient) -> None:
@@ -149,6 +163,40 @@ class TestDeleteJob:
         resp = client.delete(f"/jobs/{job_id}")
         assert resp.status_code == 409
 
+    def test_delete_cleans_up_files(self, client: TestClient) -> None:
+        from api.app import _get_db, _get_dirs
+        from api.database import update_job
+
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        create_resp = client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        job_id = create_resp.json()["job_id"]
+
+        _, results_dir = _get_dirs()
+        result_path = results_dir / f"{job_id}.json"
+        tensor_path = results_dir / f"{job_id}.pt"
+        result_path.write_text("{}")
+        tensor_path.write_bytes(b"fake")
+
+        db = _get_db()
+        update_job(
+            db,
+            job_id,
+            status="completed",
+            page_count=1,
+            duration_ns=100,
+            result_path=str(result_path),
+            tensor_path=str(tensor_path),
+        )
+
+        resp = client.delete(f"/jobs/{job_id}")
+        assert resp.status_code == 204
+        assert not result_path.exists()
+        assert not tensor_path.exists()
+
 
 class TestGetResult:
     def test_returns_404_for_pending(self, client: TestClient) -> None:
@@ -157,6 +205,34 @@ class TestGetResult:
         job_id = create_resp.json()["job_id"]
         resp = client.get(f"/jobs/{job_id}/result")
         assert resp.status_code == 404
+
+    def test_returns_200_for_completed_job(self, client: TestClient) -> None:
+        import json as json_mod
+
+        from api.app import _get_db
+        from api.database import update_job
+
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        create_resp = client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        job_id = create_resp.json()["job_id"]
+
+        # Write a real JSON result file
+        from api.app import _get_dirs
+        _, results_dir = _get_dirs()
+        result_path = results_dir / f"{job_id}.json"
+        result_path.write_text(json_mod.dumps({"file_name": "test", "model": "m", "dpi": 150, "embeddings": [], "total_duration": 1, "page_count": 1}))
+
+        db = _get_db()
+        update_job(db, job_id, status="completed", page_count=1, duration_ns=100, result_path=str(result_path), tensor_path=str(results_dir / f"{job_id}.pt"))
+
+        resp = client.get(f"/jobs/{job_id}/result")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "file_name" in data
 
 
 class TestSearch:
