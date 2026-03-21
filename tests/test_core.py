@@ -6,9 +6,14 @@ import torch
 from PIL import Image, UnidentifiedImageError
 from pytest import approx
 
-from core.constants import DPI_OPTIONS, IMAGE_EXTENSIONS, MAX_UPLOAD_BYTES
+from core.constants import (
+    DPI_OPTIONS,
+    GENERATION_MAX_TOKENS,
+    IMAGE_EXTENSIONS,
+    MAX_UPLOAD_BYTES,
+)
 from core.embedding import embed, get_device, load_image
-from core.rendering import render_pages
+from core.rendering import render_page, render_pages
 from core.search import filter_results, search_multi
 
 PDF_DATA_DIR = Path(__file__).parent / "data" / "pdf"
@@ -58,6 +63,11 @@ class TestImageExtensions:
 class TestMaxUploadBytes:
     def test_equals_50_mb(self) -> None:
         assert MAX_UPLOAD_BYTES == 50 * 1024 * 1024
+
+
+class TestGenerationMaxTokens:
+    def test_equals_1024(self) -> None:
+        assert GENERATION_MAX_TOKENS == 1024
 
 
 class TestLoadImage:
@@ -152,6 +162,35 @@ class TestRenderPages:
         pages_default = render_pages(data)
         pages_150 = render_pages(data, dpi=150)
         assert pages_default[0].size == pages_150[0].size
+
+
+class TestRenderPage:
+    def test_renders_first_page(self) -> None:
+        data = (PDF_DATA_DIR / "multi_page.pdf").read_bytes()
+        page = render_page(data, page_index=0)
+        assert isinstance(page, Image.Image)
+        assert page.mode == "RGB"
+
+    def test_renders_last_page(self) -> None:
+        data = (PDF_DATA_DIR / "multi_page.pdf").read_bytes()
+        page = render_page(data, page_index=2)
+        assert isinstance(page, Image.Image)
+        assert page.mode == "RGB"
+
+    def test_raises_for_out_of_bounds_index(self) -> None:
+        data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        with pytest.raises(IndexError):
+            render_page(data, page_index=1)
+
+    def test_raises_for_corrupt_pdf(self) -> None:
+        with pytest.raises(ValueError, match="Corrupt or unreadable PDF"):
+            render_page(b"not a pdf", page_index=0)
+
+    def test_respects_dpi(self) -> None:
+        data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        page_72 = render_page(data, page_index=0, dpi=72)
+        page_300 = render_page(data, page_index=0, dpi=300)
+        assert page_300.width > page_72.width
 
 
 class TestEmbed:
