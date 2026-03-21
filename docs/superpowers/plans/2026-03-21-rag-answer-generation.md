@@ -394,8 +394,11 @@ Then add the `TestAsk` class at the end of the file:
 ```python
 class TestAsk:
     def test_returns_503_when_not_configured(self, api: ApiFixture) -> None:
+        import os
+
         # Explicitly ensure generation env vars are absent
-        with patch.dict("os.environ", {}, clear=False):
+        env = {k: v for k, v in os.environ.items() if k not in ("GENERATION_API_URL", "GENERATION_MODEL")}
+        with patch.dict("os.environ", env, clear=True):
             resp = api.client.post("/ask", json={"query": "test"})
         assert resp.status_code == 503
 
@@ -449,6 +452,7 @@ class TestAsk:
             patch("httpx.AsyncClient") as MockClient,
         ):
             mock_client_instance = AsyncMock()
+            mock_client_instance.__aenter__.return_value = mock_client_instance
             mock_client_instance.post.return_value = mock_vlm_response
             MockClient.return_value = mock_client_instance
 
@@ -554,6 +558,7 @@ class TestAsk:
             patch("httpx.AsyncClient") as MockClient,
         ):
             mock_client_instance = AsyncMock()
+            mock_client_instance.__aenter__.return_value = mock_client_instance
             mock_client_instance.post.side_effect = httpx.TimeoutException(
                 "Connection timed out"
             )
@@ -604,6 +609,7 @@ class TestAsk:
             patch("httpx.AsyncClient") as MockClient,
         ):
             mock_client_instance = AsyncMock()
+            mock_client_instance.__aenter__.return_value = mock_client_instance
             mock_client_instance.post.return_value = mock_vlm_response
             MockClient.return_value = mock_client_instance
 
