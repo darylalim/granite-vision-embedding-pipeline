@@ -6,7 +6,7 @@ import torch
 from PIL import Image, UnidentifiedImageError
 from pytest import approx
 
-from core.constants import DPI_OPTIONS, IMAGE_EXTENSIONS, MAX_UPLOAD_BYTES
+from core.constants import DPI_OPTIONS, GENERATION_MAX_TOKENS, IMAGE_EXTENSIONS, MAX_UPLOAD_BYTES
 from core.embedding import embed, get_device, load_image
 from core.rendering import render_pages
 from core.search import filter_results, search_multi
@@ -58,6 +58,11 @@ class TestImageExtensions:
 class TestMaxUploadBytes:
     def test_equals_50_mb(self) -> None:
         assert MAX_UPLOAD_BYTES == 50 * 1024 * 1024
+
+
+class TestGenerationMaxTokens:
+    def test_equals_1024(self) -> None:
+        assert GENERATION_MAX_TOKENS == 1024
 
 
 class TestLoadImage:
