@@ -151,6 +151,10 @@ if jobs:
         except httpx.HTTPError:
             pass
 
+    # Shared lookup for search and ask results
+    if completed:
+        job_lookup = {j["id"]: j for j in completed}
+
     # Search
     if completed:
         st.subheader("Search")
@@ -196,7 +200,6 @@ if jobs:
         if "search_results" in st.session_state:
             search_results = st.session_state.search_results
             if search_results:
-                job_lookup = {j["id"]: j for j in completed}
                 for rank, sr in enumerate(search_results):
                     j = job_lookup.get(sr["file_id"])
                     if j:
@@ -258,7 +261,6 @@ if jobs:
             st.markdown(ask_result["answer"])
             if ask_result["sources"]:
                 st.caption("Sources:")
-                job_lookup = {j["id"]: j for j in completed}
                 for sr in ask_result["sources"]:
                     j = job_lookup.get(sr["file_id"])
                     if j:

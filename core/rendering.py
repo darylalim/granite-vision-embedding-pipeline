@@ -2,6 +2,12 @@ import fitz
 from PIL import Image
 
 
+def _make_matrix(dpi: int) -> fitz.Matrix:
+    """Build a fitz transformation matrix for the given DPI."""
+    scale = dpi / 72
+    return fitz.Matrix(scale, scale)
+
+
 def render_pages(data: bytes, dpi: int = 150) -> list[Image.Image]:
     """Render PDF pages as PIL Images.
 
@@ -9,8 +15,7 @@ def render_pages(data: bytes, dpi: int = 150) -> list[Image.Image]:
     Raises ValueError for corrupt or unreadable PDF data.
     """
     try:
-        scale = dpi / 72
-        matrix = fitz.Matrix(scale, scale)
+        matrix = _make_matrix(dpi)
         with fitz.open(stream=data, filetype="pdf") as doc:
             return [
                 Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
@@ -28,8 +33,7 @@ def render_page(data: bytes, page_index: int, dpi: int = 150) -> Image.Image:
     Raises IndexError if page_index is out of range.
     """
     try:
-        scale = dpi / 72
-        matrix = fitz.Matrix(scale, scale)
+        matrix = _make_matrix(dpi)
         with fitz.open(stream=data, filetype="pdf") as doc:
             if page_index < 0 or page_index >= len(doc):
                 raise IndexError(

@@ -1,3 +1,5 @@
+import sqlite3
+from collections.abc import Generator
 from pathlib import Path
 from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,9 +16,19 @@ class ApiFixture(NamedTuple):
     client: TestClient
     mock_worker: MagicMock
 
+    @property
+    def db(self) -> sqlite3.Connection:
+        """Typed accessor for app.state.db."""
+        return self.client.app.state.db  # type: ignore[union-attr]
+
+    @property
+    def results_dir(self) -> Path:
+        """Typed accessor for app.state.results_dir."""
+        return self.client.app.state.results_dir  # type: ignore[union-attr]
+
 
 @pytest.fixture
-def api(tmp_path: Path) -> ApiFixture:
+def api(tmp_path: Path) -> Generator[ApiFixture]:
     """Create a TestClient with temp directories and mocked worker."""
     uploads = tmp_path / "uploads"
     results = tmp_path / "results"
@@ -192,7 +204,7 @@ class TestDeleteJob:
         job_id = create_resp.json()["job_id"]
         from api.database import update_job
 
-        db = api.client.app.state.db
+        db = api.db
         update_job(db, job_id, status="processing")
         resp = api.client.delete(f"/jobs/{job_id}")
         assert resp.status_code == 409
@@ -208,13 +220,13 @@ class TestDeleteJob:
         )
         job_id = create_resp.json()["job_id"]
 
-        results_dir = api.client.app.state.results_dir
+        results_dir = api.results_dir
         result_path = results_dir / f"{job_id}.json"
         tensor_path = results_dir / f"{job_id}.pt"
         result_path.write_text("{}")
         tensor_path.write_bytes(b"fake")
 
-        db = api.client.app.state.db
+        db = api.db
         update_job(
             db,
             job_id,
@@ -256,7 +268,7 @@ class TestGetResult:
         )
         job_id = create_resp.json()["job_id"]
 
-        results_dir = api.client.app.state.results_dir
+        results_dir = api.results_dir
         result_path = results_dir / f"{job_id}.json"
         result_path.write_text(
             json_mod.dumps(
@@ -271,7 +283,7 @@ class TestGetResult:
             )
         )
 
-        db = api.client.app.state.db
+        db = api.db
         update_job(
             db,
             job_id,
@@ -310,7 +322,7 @@ class TestSearch:
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
-        db = api.client.app.state.db
+        db = api.db
         update_job(
             db,
             job_id,
@@ -371,7 +383,7 @@ class TestAsk:
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
-        db = api.client.app.state.db
+        db = api.db
         update_job(
             db,
             job_id,
@@ -429,7 +441,7 @@ class TestAsk:
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
-        db = api.client.app.state.db
+        db = api.db
         update_job(
             db,
             job_id,
@@ -482,7 +494,7 @@ class TestAsk:
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
-        db = api.client.app.state.db
+        db = api.db
         update_job(
             db,
             job_id,
@@ -531,7 +543,7 @@ class TestAsk:
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
-        db = api.client.app.state.db
+        db = api.db
         update_job(
             db,
             job_id,
@@ -580,7 +592,7 @@ class TestAsk:
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
-        db = api.client.app.state.db
+        db = api.db
         update_job(
             db,
             job_id,
@@ -635,7 +647,7 @@ class TestAsk:
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
-        db = api.client.app.state.db
+        db = api.db
         update_job(
             db,
             job_id,
@@ -672,7 +684,7 @@ class TestAsk:
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
-        db = api.client.app.state.db
+        db = api.db
         update_job(
             db,
             job_id,
@@ -724,7 +736,7 @@ class TestAsk:
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
-        db = api.client.app.state.db
+        db = api.db
         update_job(
             db,
             job_id,
@@ -773,10 +785,10 @@ class TestAsk:
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
-        db = api.client.app.state.db
+        db = api.db
 
         # Delete the uploaded file to simulate missing file
-        job = api.client.app.state.db.execute(
+        job = api.db.execute(
             "SELECT file_path FROM jobs WHERE id = ?", (job_id,)
         ).fetchone()
         Path(job[0]).unlink()
