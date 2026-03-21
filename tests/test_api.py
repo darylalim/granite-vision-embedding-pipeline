@@ -565,3 +565,52 @@ class TestAsk:
 
         assert resp.status_code == 502
         assert "Generation service error" in resp.json()["detail"]
+
+    def test_returns_502_on_vlm_malformed_response(self, api: ApiFixture) -> None:
+        from concurrent.futures import Future
+
+        from api.database import update_job
+
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        job_id = create_resp.json()["job_id"]
+        db = api.client.app.state.db
+        update_job(
+            db,
+            job_id,
+            status="completed",
+            page_count=1,
+            duration_ns=100,
+            result_path="r.json",
+            tensor_path="r.pt",
+        )
+
+        search_future: Future = Future()
+        search_future.set_result([(job_id, 0, 0.9)])
+        api.mock_worker.enqueue_search.return_value = search_future
+
+        mock_vlm_response = httpx.Response(200, json={"unexpected": "format"})
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "GENERATION_API_URL": "http://fake-vlm:8000/v1",
+                    "GENERATION_MODEL": "test-model",
+                },
+            ),
+            patch("httpx.AsyncClient") as MockClient,
+        ):
+            mock_client_instance = AsyncMock()
+            mock_client_instance.__aenter__.return_value = mock_client_instance
+            mock_client_instance.post.return_value = mock_vlm_response
+            MockClient.return_value = mock_client_instance
+
+            resp = api.client.post("/ask", json={"query": "What is this?"})
+
+        assert resp.status_code == 502
+        assert "Unexpected response" in resp.json()["detail"]

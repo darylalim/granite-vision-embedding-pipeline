@@ -277,8 +277,10 @@ def create_app() -> FastAPI:
             os.environ.get("GENERATION_MAX_TOKENS", GENERATION_MAX_TOKENS)
         )
 
+        timeout = float(os.environ.get("GENERATION_TIMEOUT", 120.0))
+
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 vlm_resp = await client.post(
                     f"{generation_api_url}/chat/completions",
                     headers={"Authorization": f"Bearer {generation_api_key}"},
