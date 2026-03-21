@@ -616,3 +616,194 @@ class TestAsk:
 
         assert resp.status_code == 502
         assert "Unexpected response" in resp.json()["detail"]
+
+    def test_returns_503_when_only_model_missing(self, api: ApiFixture) -> None:
+        with patch.dict(
+            "os.environ",
+            {"GENERATION_API_URL": "http://fake-vlm:8000/v1"},
+        ):
+            resp = api.client.post("/ask", json={"query": "test"})
+        assert resp.status_code == 503
+
+    def test_rejects_invalid_filter_file_id(self, api: ApiFixture) -> None:
+        from api.database import update_job
+
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        job_id = create_resp.json()["job_id"]
+        db = api.client.app.state.db
+        update_job(
+            db,
+            job_id,
+            status="completed",
+            page_count=1,
+            duration_ns=100,
+            result_path="r.json",
+            tensor_path="r.pt",
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "GENERATION_API_URL": "http://fake-vlm:8000/v1",
+                "GENERATION_MODEL": "test-model",
+            },
+        ):
+            resp = api.client.post(
+                "/ask",
+                json={"query": "test", "filter_file_id": "nonexistent"},
+            )
+        assert resp.status_code == 400
+        assert "filter_file_id" in resp.json()["detail"]
+
+    def test_returns_answer_with_image_file(self, api: ApiFixture) -> None:
+        from concurrent.futures import Future
+
+        from api.database import update_job
+
+        img_data = (IMAGE_DATA_DIR / "red.png").read_bytes()
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("red.png", img_data, "image/png")},
+            data={"dpi": "150"},
+        )
+        job_id = create_resp.json()["job_id"]
+        db = api.client.app.state.db
+        update_job(
+            db,
+            job_id,
+            status="completed",
+            page_count=1,
+            duration_ns=100,
+            result_path="r.json",
+            tensor_path="r.pt",
+        )
+
+        search_future: Future = Future()
+        search_future.set_result([(job_id, 0, 0.9)])
+        api.mock_worker.enqueue_search.return_value = search_future
+
+        mock_vlm_response = httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "A red image."}}]},
+        )
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "GENERATION_API_URL": "http://fake-vlm:8000/v1",
+                    "GENERATION_MODEL": "test-model",
+                },
+            ),
+            patch("httpx.AsyncClient") as MockClient,
+        ):
+            mock_client_instance = AsyncMock()
+            mock_client_instance.__aenter__.return_value = mock_client_instance
+            mock_client_instance.post.return_value = mock_vlm_response
+            MockClient.return_value = mock_client_instance
+
+            resp = api.client.post("/ask", json={"query": "What color?"})
+
+        assert resp.status_code == 200
+        assert resp.json()["answer"] == "A red image."
+
+    def test_returns_502_on_vlm_connect_error(self, api: ApiFixture) -> None:
+        from concurrent.futures import Future
+
+        from api.database import update_job
+
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        job_id = create_resp.json()["job_id"]
+        db = api.client.app.state.db
+        update_job(
+            db,
+            job_id,
+            status="completed",
+            page_count=1,
+            duration_ns=100,
+            result_path="r.json",
+            tensor_path="r.pt",
+        )
+
+        search_future: Future = Future()
+        search_future.set_result([(job_id, 0, 0.9)])
+        api.mock_worker.enqueue_search.return_value = search_future
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "GENERATION_API_URL": "http://fake-vlm:8000/v1",
+                    "GENERATION_MODEL": "test-model",
+                },
+            ),
+            patch("httpx.AsyncClient") as MockClient,
+        ):
+            mock_client_instance = AsyncMock()
+            mock_client_instance.__aenter__.return_value = mock_client_instance
+            mock_client_instance.post.side_effect = httpx.ConnectError(
+                "Connection refused"
+            )
+            MockClient.return_value = mock_client_instance
+
+            resp = api.client.post("/ask", json={"query": "test"})
+
+        assert resp.status_code == 502
+        assert "Unable to reach" in resp.json()["detail"]
+
+    def test_skips_missing_upload_file(self, api: ApiFixture) -> None:
+        from concurrent.futures import Future
+
+        from api.database import update_job
+
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        job_id = create_resp.json()["job_id"]
+        db = api.client.app.state.db
+
+        # Delete the uploaded file to simulate missing file
+        job = api.client.app.state.db.execute(
+            "SELECT file_path FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        Path(job[0]).unlink()
+
+        update_job(
+            db,
+            job_id,
+            status="completed",
+            page_count=1,
+            duration_ns=100,
+            result_path="r.json",
+            tensor_path="r.pt",
+        )
+
+        search_future: Future = Future()
+        search_future.set_result([(job_id, 0, 0.9)])
+        api.mock_worker.enqueue_search.return_value = search_future
+
+        with patch.dict(
+            "os.environ",
+            {
+                "GENERATION_API_URL": "http://fake-vlm:8000/v1",
+                "GENERATION_MODEL": "test-model",
+            },
+        ):
+            resp = api.client.post("/ask", json={"query": "test"})
+
+        assert resp.status_code == 200
+        assert resp.json()["sources"] == []
+        assert "Could not load" in resp.json()["answer"]

@@ -186,6 +186,11 @@ class TestRenderPage:
         with pytest.raises(ValueError, match="Corrupt or unreadable PDF"):
             render_page(b"not a pdf", page_index=0)
 
+    def test_raises_for_negative_index(self) -> None:
+        data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        with pytest.raises(IndexError):
+            render_page(data, page_index=-1)
+
     def test_respects_dpi(self) -> None:
         data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
         page_72 = render_page(data, page_index=0, dpi=72)
