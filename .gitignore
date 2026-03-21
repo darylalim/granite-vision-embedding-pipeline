@@ -6,3 +6,6 @@ __pycache__
 .venv
 .transformers_cache
 docs/plans/
+uploads/
+results/
+data/
