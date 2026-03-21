@@ -1,6 +1,6 @@
 # Granite Vision Embedding Pipeline
 
-Streamlit + FastAPI app for generating vector embeddings from PDF documents and images using IBM Granite's [Vision Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding) model, with batch processing via a SQLite job queue.
+Streamlit + FastAPI app for generating vector embeddings from PDF documents and images using IBM Granite's [Vision Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding) model, with batch processing via a SQLite job queue and RAG answer generation via an external VLM.
 
 ## Features
 
@@ -9,6 +9,7 @@ Streamlit + FastAPI app for generating vector embeddings from PDF documents and 
 - Multi-vector embeddings with [Granite Vision 3.3 2B Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding)
 - Batch processing of thousands of documents via background worker thread
 - Cross-document text search with top-K and score threshold filtering
+- RAG answer generation via external OpenAI-compatible VLM (OpenAI, Ollama, vLLM, etc.)
 - Per-document and combined JSON embedding downloads
 - Automatic device selection (MPS > CUDA > CPU)
 - Job dashboard with status tracking, filtering, and deletion
@@ -46,3 +47,8 @@ uv run pytest         # test
 | `UPLOAD_DIR` | `uploads/` | Uploaded file storage |
 | `RESULT_DIR` | `results/` | Embedding output storage |
 | `DATABASE_PATH` | `data/jobs.db` | SQLite database path |
+| `GENERATION_API_URL` | None | VLM endpoint for answer generation |
+| `GENERATION_API_KEY` | `""` | VLM auth token |
+| `GENERATION_MODEL` | None | VLM model ID |
+| `GENERATION_MAX_TOKENS` | `1024` | Max VLM response tokens |
+| `GENERATION_TIMEOUT` | `120` | VLM request timeout (seconds) |

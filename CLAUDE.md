@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Streamlit + FastAPI app for generating vector embeddings from PDF documents and images using IBM Granite's [Vision Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding) model, with batch processing via a SQLite job queue.
+Streamlit + FastAPI app for generating vector embeddings from PDF documents and images using IBM Granite's [Vision Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding) model, with batch processing via a SQLite job queue and RAG answer generation via an external VLM.
 
 ## Setup
 
@@ -35,7 +35,7 @@ uv run streamlit run streamlit_app.py
 
 - `fastapi` — REST API framework
 - `uvicorn` — ASGI server
-- `httpx` — HTTP client (Streamlit → API)
+- `httpx` — HTTP client (Streamlit → API, API → VLM)
 - `python-multipart` — file upload handling
 - `transformers` — Hugging Face model loading (`AutoModel`, `AutoProcessor`)
 - `pymupdf` — PDF page rendering
@@ -67,8 +67,9 @@ uv run streamlit run streamlit_app.py
 
 ```
 Streamlit UI  →  FastAPI Backend  →  Embedding Worker (background thread)
-                      ↕
-                   SQLite DB (WAL mode)
+                      ↕                     ↕
+                   SQLite DB           External VLM API
+                  (WAL mode)          (answer generation)
                       ↕
                  File Storage (uploads/ , results/)
 ```
@@ -82,7 +83,7 @@ Streamlit UI  →  FastAPI Backend  →  Embedding Worker (background thread)
 
 Pure logic with no Streamlit or FastAPI dependencies:
 
-- `core/constants.py` — `MODEL_ID`, `DPI_OPTIONS`, `IMAGE_EXTENSIONS`, `MAX_UPLOAD_BYTES`
+- `core/constants.py` — `MODEL_ID`, `DPI_OPTIONS`, `IMAGE_EXTENSIONS`, `MAX_UPLOAD_BYTES`, `GENERATION_MAX_TOKENS`
 - `core/types.py` — `EmbeddingProcessor` protocol
 - `core/embedding.py` — `get_device`, `load_model`, `load_image`, `embed`
 - `core/rendering.py` — `render_pages`, `render_page`
@@ -103,6 +104,10 @@ Pure logic with no Streamlit or FastAPI dependencies:
 ### Pipeline
 
 Upload files → API saves to `uploads/` and creates SQLite job → worker picks up pending jobs (FIFO) → renders PDF pages or loads images → embeds with model → saves JSON + `.pt` to `results/` → marks completed → Streamlit polls for status
+
+### Answer Generation
+
+`POST /ask` retrieves relevant pages via the embedding search pipeline, re-renders only the matched pages, builds an OpenAI-compatible request using `build_messages()`, and calls an external VLM via `httpx.AsyncClient`. Returns a grounded answer with source citations. Requires `GENERATION_API_URL` and `GENERATION_MODEL` to be configured; returns 503 otherwise.
 
 ### Worker
 
