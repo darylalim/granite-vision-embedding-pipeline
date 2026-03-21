@@ -11,11 +11,12 @@ def search_multi(
     filter_file_id: str | None = None,
 ) -> list[tuple[str, int, float]]:
     """Score a text query across multiple documents and return ranked results."""
-    docs = (
-        {filter_file_id: embeddings[filter_file_id]}
-        if filter_file_id is not None
-        else embeddings
-    )
+    if filter_file_id is not None:
+        if filter_file_id not in embeddings:
+            return []
+        docs = {filter_file_id: embeddings[filter_file_id]}
+    else:
+        docs = embeddings
     batch = processor.process_queries([query])
     batch = {
         k: v.to(model.device) if isinstance(v, torch.Tensor) else v

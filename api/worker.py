@@ -34,6 +34,7 @@ class EmbeddingWorker:
         self._results_dir = results_dir
         self._cache_max = cache_max
         self._tensor_cache: OrderedDict[str, torch.Tensor] = OrderedDict()
+        self._cache_lock = threading.Lock()
         self._search_queue: queue.Queue[tuple[dict, Future]] = queue.Queue()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -67,11 +68,12 @@ class EmbeddingWorker:
         return future
 
     def evict_cache(self, job_id: str) -> None:
-        """Remove a tensor from the cache."""
-        self._tensor_cache.pop(job_id, None)
+        """Remove a tensor from the cache. Thread-safe."""
+        with self._cache_lock:
+            self._tensor_cache.pop(job_id, None)
 
     def _enforce_cache_limit(self) -> None:
-        """Evict LRU entries until cache is within limit."""
+        """Evict LRU entries until cache is within limit. Caller must hold _cache_lock."""
         while len(self._tensor_cache) > self._cache_max:
             self._tensor_cache.popitem(last=False)
 
@@ -127,9 +129,10 @@ class EmbeddingWorker:
 
     def _get_or_load_tensor(self, job_id: str) -> torch.Tensor | None:
         """Load tensor from cache or .pt file."""
-        if job_id in self._tensor_cache:
-            self._tensor_cache.move_to_end(job_id)
-            return self._tensor_cache[job_id]
+        with self._cache_lock:
+            if job_id in self._tensor_cache:
+                self._tensor_cache.move_to_end(job_id)
+                return self._tensor_cache[job_id]
 
         job = get_job(self._db, job_id)
         if not job or not job.get("tensor_path"):
@@ -140,8 +143,9 @@ class EmbeddingWorker:
             return None
 
         tensor = torch.load(tensor_path, weights_only=True)
-        self._tensor_cache[job_id] = tensor
-        self._enforce_cache_limit()
+        with self._cache_lock:
+            self._tensor_cache[job_id] = tensor
+            self._enforce_cache_limit()
         return tensor
 
     def process_job(self, job: dict) -> None:
@@ -160,7 +164,7 @@ class EmbeddingWorker:
                 pdf_data = file_path.read_bytes()
                 pages = render_pages(pdf_data, dpi=job["dpi"])
                 if not pages:
-                    raise ValueError("PDF contains no pages to embed")
+                    raise ValueError("PDF contains no pages")
 
             page_embeddings = embed(pages, self._model, self._processor)
             total_duration = time.perf_counter_ns() - total_start
@@ -183,8 +187,9 @@ class EmbeddingWorker:
             torch.save(page_embeddings, tensor_path)
 
             # Cache the tensor
-            self._tensor_cache[job_id] = page_embeddings
-            self._enforce_cache_limit()
+            with self._cache_lock:
+                self._tensor_cache[job_id] = page_embeddings
+                self._enforce_cache_limit()
 
             update_job(
                 self._db,

@@ -43,7 +43,9 @@ if uploaded_files:
                     if resp.status_code == 201:
                         st.success(f"Submitted: {f.name}")
                     else:
-                        st.error(f"{f.name}: {resp.json().get('detail', 'Unknown error')}")
+                        st.error(
+                            f"{f.name}: {resp.json().get('detail', 'Unknown error')}"
+                        )
                 except httpx.HTTPError as e:
                     st.error(f"{f.name}: {e}")
 
@@ -122,6 +124,7 @@ if jobs:
                     try:
                         with api_client() as client:
                             client.delete(f"/jobs/{job['id']}")
+                        st.session_state.pop("search_results", None)
                         st.rerun()
                     except httpx.HTTPError as e:
                         st.error(str(e))
@@ -181,7 +184,9 @@ if jobs:
                             },
                         )
                         if search_resp.status_code == 200:
-                            st.session_state.search_results = search_resp.json()["results"]
+                            st.session_state.search_results = search_resp.json()[
+                                "results"
+                            ]
                         else:
                             st.error(search_resp.json().get("detail", "Search failed"))
                 except httpx.HTTPError as e:

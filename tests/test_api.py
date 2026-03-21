@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import NamedTuple
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,8 +9,13 @@ PDF_DATA_DIR = Path(__file__).parent / "data" / "pdf"
 IMAGE_DATA_DIR = Path(__file__).parent / "data" / "images"
 
 
+class ApiFixture(NamedTuple):
+    client: TestClient
+    mock_worker: MagicMock
+
+
 @pytest.fixture
-def client(tmp_path: Path) -> TestClient:
+def api(tmp_path: Path) -> ApiFixture:
     """Create a TestClient with temp directories and mocked worker."""
     uploads = tmp_path / "uploads"
     results = tmp_path / "results"
@@ -18,31 +24,30 @@ def client(tmp_path: Path) -> TestClient:
     results.mkdir()
 
     with (
-        patch.dict("os.environ", {
-            "UPLOAD_DIR": str(uploads),
-            "RESULT_DIR": str(results),
-            "DATABASE_PATH": str(db_path),
-        }),
+        patch.dict(
+            "os.environ",
+            {
+                "UPLOAD_DIR": str(uploads),
+                "RESULT_DIR": str(results),
+                "DATABASE_PATH": str(db_path),
+            },
+        ),
         patch("api.app.EmbeddingWorker") as MockWorker,
     ):
         mock_worker = MagicMock()
         mock_worker.is_running = True
         MockWorker.return_value = mock_worker
 
-        import api.app
-        api.app._db = None
-        api.app._worker = None
-
         from api.app import create_app
+
         app = create_app()
         with TestClient(app) as tc:
-            tc._mock_worker = mock_worker
-            yield tc
+            yield ApiFixture(client=tc, mock_worker=mock_worker)
 
 
 class TestHealth:
-    def test_returns_health(self, client: TestClient) -> None:
-        resp = client.get("/health")
+    def test_returns_health(self, api: ApiFixture) -> None:
+        resp = api.client.get("/health")
         assert resp.status_code == 200
         data = resp.json()
         assert "device" in data
@@ -51,9 +56,9 @@ class TestHealth:
 
 
 class TestUploadJob:
-    def test_upload_pdf(self, client: TestClient) -> None:
+    def test_upload_pdf(self, api: ApiFixture) -> None:
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
-        resp = client.post(
+        resp = api.client.post(
             "/jobs",
             files={"file": ("test.pdf", pdf_data, "application/pdf")},
             data={"dpi": "150"},
@@ -63,125 +68,152 @@ class TestUploadJob:
         assert "job_id" in data
         assert data["status"] == "pending"
 
-    def test_upload_image(self, client: TestClient) -> None:
+    def test_upload_image(self, api: ApiFixture) -> None:
         img_data = (IMAGE_DATA_DIR / "red.png").read_bytes()
-        resp = client.post(
+        resp = api.client.post(
             "/jobs",
             files={"file": ("red.png", img_data, "image/png")},
             data={"dpi": "150"},
         )
         assert resp.status_code == 201
 
-    def test_rejects_invalid_file_type(self, client: TestClient) -> None:
-        resp = client.post(
+    def test_rejects_invalid_file_type(self, api: ApiFixture) -> None:
+        resp = api.client.post(
             "/jobs",
             files={"file": ("test.txt", b"hello", "text/plain")},
             data={"dpi": "150"},
         )
         assert resp.status_code == 400
 
-    def test_rejects_oversized_file(self, client: TestClient) -> None:
+    def test_rejects_invalid_dpi(self, api: ApiFixture) -> None:
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        resp = api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "999"},
+        )
+        assert resp.status_code == 400
+        assert "DPI" in resp.json()["detail"]
+
+    def test_rejects_oversized_file(self, api: ApiFixture) -> None:
         big_data = b"x" * (50 * 1024 * 1024 + 1)
-        resp = client.post(
+        resp = api.client.post(
             "/jobs",
             files={"file": ("big.pdf", big_data, "application/pdf")},
             data={"dpi": "150"},
         )
         assert resp.status_code == 400
 
-    def test_upload_stores_dpi(self, client: TestClient) -> None:
+    def test_upload_stores_dpi(self, api: ApiFixture) -> None:
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
-        create_resp = client.post(
+        create_resp = api.client.post(
             "/jobs",
             files={"file": ("test.pdf", pdf_data, "application/pdf")},
             data={"dpi": "300"},
         )
         assert create_resp.status_code == 201
         job_id = create_resp.json()["job_id"]
-
-        resp = client.get(f"/jobs/{job_id}")
+        resp = api.client.get(f"/jobs/{job_id}")
         assert resp.status_code == 200
         assert resp.json()["dpi"] == 300
 
 
 class TestListJobs:
-    def test_list_empty(self, client: TestClient) -> None:
-        resp = client.get("/jobs")
+    def test_list_empty(self, api: ApiFixture) -> None:
+        resp = api.client.get("/jobs")
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_list_after_upload(self, client: TestClient) -> None:
+    def test_list_after_upload(self, api: ApiFixture) -> None:
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
-        client.post("/jobs", files={"file": ("test.pdf", pdf_data, "application/pdf")}, data={"dpi": "150"})
-        resp = client.get("/jobs")
+        api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        resp = api.client.get("/jobs")
         assert resp.status_code == 200
         assert len(resp.json()) == 1
 
-    def test_filter_by_status(self, client: TestClient) -> None:
+    def test_filter_by_status(self, api: ApiFixture) -> None:
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
-        client.post("/jobs", files={"file": ("test.pdf", pdf_data, "application/pdf")}, data={"dpi": "150"})
-        resp = client.get("/jobs?status=completed")
+        api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        resp = api.client.get("/jobs?status=completed")
         assert resp.status_code == 200
         assert len(resp.json()) == 0
 
 
 class TestGetJob:
-    def test_get_existing(self, client: TestClient) -> None:
+    def test_get_existing(self, api: ApiFixture) -> None:
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
-        create_resp = client.post("/jobs", files={"file": ("test.pdf", pdf_data, "application/pdf")}, data={"dpi": "150"})
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
         job_id = create_resp.json()["job_id"]
-        resp = client.get(f"/jobs/{job_id}")
+        resp = api.client.get(f"/jobs/{job_id}")
         assert resp.status_code == 200
         assert resp.json()["id"] == job_id
 
-    def test_get_nonexistent(self, client: TestClient) -> None:
-        resp = client.get("/jobs/nonexistent")
+    def test_get_nonexistent(self, api: ApiFixture) -> None:
+        resp = api.client.get("/jobs/nonexistent")
         assert resp.status_code == 404
 
 
 class TestDeleteJob:
-    def test_delete_pending(self, client: TestClient) -> None:
+    def test_delete_pending(self, api: ApiFixture) -> None:
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
-        create_resp = client.post("/jobs", files={"file": ("test.pdf", pdf_data, "application/pdf")}, data={"dpi": "150"})
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
         job_id = create_resp.json()["job_id"]
-        resp = client.delete(f"/jobs/{job_id}")
+        resp = api.client.delete(f"/jobs/{job_id}")
         assert resp.status_code == 204
 
-    def test_delete_nonexistent(self, client: TestClient) -> None:
-        resp = client.delete("/jobs/nonexistent")
+    def test_delete_nonexistent(self, api: ApiFixture) -> None:
+        resp = api.client.delete("/jobs/nonexistent")
         assert resp.status_code == 404
 
-    def test_delete_processing_returns_409(self, client: TestClient) -> None:
+    def test_delete_processing_returns_409(self, api: ApiFixture) -> None:
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
-        create_resp = client.post("/jobs", files={"file": ("test.pdf", pdf_data, "application/pdf")}, data={"dpi": "150"})
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
         job_id = create_resp.json()["job_id"]
-        # Manually set to processing
         from api.database import update_job
-        from api.app import _get_db
-        db = _get_db()
+
+        db = api.client.app.state.db
         update_job(db, job_id, status="processing")
-        resp = client.delete(f"/jobs/{job_id}")
+        resp = api.client.delete(f"/jobs/{job_id}")
         assert resp.status_code == 409
 
-    def test_delete_cleans_up_files(self, client: TestClient) -> None:
-        from api.app import _get_db, _get_dirs
+    def test_delete_cleans_up_files(self, api: ApiFixture) -> None:
         from api.database import update_job
 
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
-        create_resp = client.post(
+        create_resp = api.client.post(
             "/jobs",
             files={"file": ("test.pdf", pdf_data, "application/pdf")},
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
 
-        _, results_dir = _get_dirs()
+        results_dir = api.client.app.state.results_dir
         result_path = results_dir / f"{job_id}.json"
         tensor_path = results_dir / f"{job_id}.pt"
         result_path.write_text("{}")
         tensor_path.write_bytes(b"fake")
 
-        db = _get_db()
+        db = api.client.app.state.db
         update_job(
             db,
             job_id,
@@ -192,73 +224,122 @@ class TestDeleteJob:
             tensor_path=str(tensor_path),
         )
 
-        resp = client.delete(f"/jobs/{job_id}")
+        resp = api.client.delete(f"/jobs/{job_id}")
         assert resp.status_code == 204
         assert not result_path.exists()
         assert not tensor_path.exists()
 
 
 class TestGetResult:
-    def test_returns_404_for_pending(self, client: TestClient) -> None:
+    def test_returns_404_for_pending(self, api: ApiFixture) -> None:
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
-        create_resp = client.post("/jobs", files={"file": ("test.pdf", pdf_data, "application/pdf")}, data={"dpi": "150"})
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
         job_id = create_resp.json()["job_id"]
-        resp = client.get(f"/jobs/{job_id}/result")
+        resp = api.client.get(f"/jobs/{job_id}/result")
         assert resp.status_code == 404
 
-    def test_returns_200_for_completed_job(self, client: TestClient) -> None:
+    def test_returns_200_for_completed_job(self, api: ApiFixture) -> None:
         import json as json_mod
 
-        from api.app import _get_db
         from api.database import update_job
 
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
-        create_resp = client.post(
+        create_resp = api.client.post(
             "/jobs",
             files={"file": ("test.pdf", pdf_data, "application/pdf")},
             data={"dpi": "150"},
         )
         job_id = create_resp.json()["job_id"]
 
-        # Write a real JSON result file
-        from api.app import _get_dirs
-        _, results_dir = _get_dirs()
+        results_dir = api.client.app.state.results_dir
         result_path = results_dir / f"{job_id}.json"
-        result_path.write_text(json_mod.dumps({"file_name": "test", "model": "m", "dpi": 150, "embeddings": [], "total_duration": 1, "page_count": 1}))
+        result_path.write_text(
+            json_mod.dumps(
+                {
+                    "file_name": "test",
+                    "model": "m",
+                    "dpi": 150,
+                    "embeddings": [],
+                    "total_duration": 1,
+                    "page_count": 1,
+                }
+            )
+        )
 
-        db = _get_db()
-        update_job(db, job_id, status="completed", page_count=1, duration_ns=100, result_path=str(result_path), tensor_path=str(results_dir / f"{job_id}.pt"))
+        db = api.client.app.state.db
+        update_job(
+            db,
+            job_id,
+            status="completed",
+            page_count=1,
+            duration_ns=100,
+            result_path=str(result_path),
+            tensor_path=str(results_dir / f"{job_id}.pt"),
+        )
 
-        resp = client.get(f"/jobs/{job_id}/result")
+        resp = api.client.get(f"/jobs/{job_id}/result")
         assert resp.status_code == 200
         data = resp.json()
         assert "file_name" in data
 
 
 class TestSearch:
-    def test_returns_empty_with_no_completed_jobs(self, client: TestClient) -> None:
-        resp = client.post("/search", json={"query": "test"})
+    def test_returns_empty_with_no_completed_jobs(self, api: ApiFixture) -> None:
+        resp = api.client.post("/search", json={"query": "test"})
         assert resp.status_code == 200
         assert resp.json()["results"] == []
 
-    def test_enqueues_search_to_worker(self, client: TestClient) -> None:
+    def test_enqueues_search_to_worker(self, api: ApiFixture) -> None:
         from concurrent.futures import Future
+
+        from api.database import update_job
+
         future: Future = Future()
         future.set_result([("job1", 0, 0.9)])
-        client._mock_worker.enqueue_search.return_value = future
+        api.mock_worker.enqueue_search.return_value = future
 
-        # Create and manually complete a job
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
-        create_resp = client.post("/jobs", files={"file": ("test.pdf", pdf_data, "application/pdf")}, data={"dpi": "150"})
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("test.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
         job_id = create_resp.json()["job_id"]
-        from api.app import _get_db
-        from api.database import update_job
-        db = _get_db()
-        update_job(db, job_id, status="completed", page_count=1, duration_ns=100, result_path="r.json", tensor_path="r.pt")
+        db = api.client.app.state.db
+        update_job(
+            db,
+            job_id,
+            status="completed",
+            page_count=1,
+            duration_ns=100,
+            result_path="r.json",
+            tensor_path="r.pt",
+        )
 
-        resp = client.post("/search", json={"query": "charts", "top_k": 5})
+        resp = api.client.post("/search", json={"query": "charts", "top_k": 5})
         assert resp.status_code == 200
         results = resp.json()["results"]
         assert len(results) == 1
         assert results[0]["file_id"] == "job1"
-        client._mock_worker.enqueue_search.assert_called_once()
+        api.mock_worker.enqueue_search.assert_called_once()
+
+    def test_rejects_invalid_filter_file_id(self, api: ApiFixture) -> None:
+        resp = api.client.post(
+            "/search",
+            json={"query": "test", "filter_file_id": "nonexistent"},
+        )
+        # No completed jobs, so empty results (filter_file_id not validated when no jobs)
+        assert resp.status_code == 200
+        assert resp.json()["results"] == []
+
+    def test_rejects_invalid_top_k(self, api: ApiFixture) -> None:
+        resp = api.client.post("/search", json={"query": "test", "top_k": 0})
+        assert resp.status_code == 422
+
+    def test_rejects_negative_min_score(self, api: ApiFixture) -> None:
+        resp = api.client.post("/search", json={"query": "test", "min_score": -1.0})
+        assert resp.status_code == 422

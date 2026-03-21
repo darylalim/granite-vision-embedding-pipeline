@@ -135,7 +135,7 @@ class TestProcessJob:
         job = get_job(db, job_id)
         assert job["status"] == "failed"
         assert job["error"] is not None
-        assert "no pages" in job["error"].lower()
+        assert "corrupt" in job["error"].lower() or "unreadable" in job["error"].lower()
 
     @patch("api.worker.load_model")
     def test_result_json_contains_expected_fields(
@@ -167,7 +167,14 @@ class TestProcessJob:
         job = get_job(db, job_id)
         assert job["status"] == "completed"
         result_data = json.loads(Path(job["result_path"]).read_text())
-        for field in ("file_name", "model", "dpi", "embeddings", "total_duration", "page_count"):
+        for field in (
+            "file_name",
+            "model",
+            "dpi",
+            "embeddings",
+            "total_duration",
+            "page_count",
+        ):
             assert field in result_data
 
     @patch("api.worker.load_model")

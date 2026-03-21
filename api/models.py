@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class JobResponse(BaseModel):
@@ -22,8 +22,8 @@ class JobCreateResponse(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str
-    top_k: int = 5
-    min_score: float = 0.0
+    top_k: int = Field(default=5, ge=1)
+    min_score: float = Field(default=0.0, ge=0.0)
     filter_file_id: str | None = None
 
 

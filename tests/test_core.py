@@ -132,13 +132,13 @@ class TestRenderPages:
         assert all(isinstance(p, Image.Image) for p in pages)
         assert all(p.mode == "RGB" for p in pages)
 
-    def test_returns_empty_for_no_pages(self) -> None:
-        pages = render_pages(b"%PDF-1.4\n%%EOF\n")
-        assert pages == []
+    def test_raises_for_empty_pdf(self) -> None:
+        with pytest.raises(ValueError, match="Corrupt or unreadable PDF"):
+            render_pages(b"%PDF-1.4\n%%EOF\n")
 
-    def test_returns_empty_for_invalid_data(self) -> None:
-        pages = render_pages(b"not a pdf")
-        assert pages == []
+    def test_raises_for_invalid_data(self) -> None:
+        with pytest.raises(ValueError, match="Corrupt or unreadable PDF"):
+            render_pages(b"not a pdf")
 
     def test_higher_dpi_produces_larger_images(self) -> None:
         data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
@@ -300,5 +300,19 @@ class TestSearchMulti:
         mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
 
         result = search_multi("test query", mock_model, mock_processor, {})
+
+        assert result == []
+
+    def test_returns_empty_for_missing_filter_file_id(self) -> None:
+        mock_processor = _make_query_processor()
+        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
+
+        embeddings: dict[str, torch.Tensor] = {
+            "id_a": torch.randn(1, 4, 128),
+        }
+
+        result = search_multi(
+            "test", mock_model, mock_processor, embeddings, filter_file_id="nonexistent"
+        )
 
         assert result == []

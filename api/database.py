@@ -4,9 +4,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def get_connection(db_path: Path | str) -> sqlite3.Connection:
+def get_connection(
+    db_path: Path | str, *, check_same_thread: bool = True
+) -> sqlite3.Connection:
     """Create a SQLite connection with WAL mode and busy timeout."""
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
@@ -88,7 +90,12 @@ def update_job(
     tensor_path: str | None = None,
     error: str | None = None,
 ) -> None:
-    """Update a job's status and optional metadata fields."""
+    """Update a job's status and optional metadata fields.
+
+    Uses COALESCE so None values preserve existing data. This means fields
+    cannot be reset to NULL once set — acceptable for the one-way lifecycle
+    (pending -> processing -> completed/failed).
+    """
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """UPDATE jobs SET status = ?, updated_at = ?, page_count = COALESCE(?, page_count),

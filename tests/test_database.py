@@ -43,8 +43,12 @@ class TestInitDb:
 class TestCreateJob:
     def test_inserts_pending_job(self, db: sqlite3.Connection) -> None:
         job_id = create_job(
-            db, file_name="test.pdf", file_stem="test",
-            file_path="uploads/abc.pdf", file_type="pdf", dpi=150,
+            db,
+            file_name="test.pdf",
+            file_stem="test",
+            file_path="uploads/abc.pdf",
+            file_type="pdf",
+            dpi=150,
         )
         job = get_job(db, job_id)
         assert job is not None
@@ -55,12 +59,34 @@ class TestCreateJob:
         assert job["dpi"] == 150
 
     def test_generates_unique_ids(self, db: sqlite3.Connection) -> None:
-        id1 = create_job(db, file_name="a.pdf", file_stem="a", file_path="uploads/a.pdf", file_type="pdf", dpi=150)
-        id2 = create_job(db, file_name="b.pdf", file_stem="b", file_path="uploads/b.pdf", file_type="pdf", dpi=150)
+        id1 = create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path="uploads/a.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
+        id2 = create_job(
+            db,
+            file_name="b.pdf",
+            file_stem="b",
+            file_path="uploads/b.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
         assert id1 != id2
 
     def test_accepts_optional_job_id(self, db: sqlite3.Connection) -> None:
-        job_id = create_job(db, file_name="a.pdf", file_stem="a", file_path="uploads/a.pdf", file_type="pdf", dpi=150, job_id="custom123")
+        job_id = create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path="uploads/a.pdf",
+            file_type="pdf",
+            dpi=150,
+            job_id="custom123",
+        )
         assert job_id == "custom123"
         job = get_job(db, "custom123")
         assert job is not None
@@ -73,22 +99,72 @@ class TestGetJob:
 
 class TestListJobs:
     def test_returns_all_jobs(self, db: sqlite3.Connection) -> None:
-        create_job(db, file_name="a.pdf", file_stem="a", file_path="uploads/a.pdf", file_type="pdf", dpi=150)
-        create_job(db, file_name="b.pdf", file_stem="b", file_path="uploads/b.pdf", file_type="pdf", dpi=150)
+        create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path="uploads/a.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
+        create_job(
+            db,
+            file_name="b.pdf",
+            file_stem="b",
+            file_path="uploads/b.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
         jobs = list_jobs(db)
         assert len(jobs) == 2
 
     def test_filters_by_status(self, db: sqlite3.Connection) -> None:
-        job_id = create_job(db, file_name="a.pdf", file_stem="a", file_path="uploads/a.pdf", file_type="pdf", dpi=150)
-        update_job(db, job_id, status="completed", page_count=1, duration_ns=100, result_path="results/a.json", tensor_path="results/a.pt")
-        create_job(db, file_name="b.pdf", file_stem="b", file_path="uploads/b.pdf", file_type="pdf", dpi=150)
+        job_id = create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path="uploads/a.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
+        update_job(
+            db,
+            job_id,
+            status="completed",
+            page_count=1,
+            duration_ns=100,
+            result_path="results/a.json",
+            tensor_path="results/a.pt",
+        )
+        create_job(
+            db,
+            file_name="b.pdf",
+            file_stem="b",
+            file_path="uploads/b.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
         pending = list_jobs(db, status="pending")
         assert len(pending) == 1
         assert pending[0]["file_name"] == "b.pdf"
 
     def test_ordered_by_created_at(self, db: sqlite3.Connection) -> None:
-        create_job(db, file_name="first.pdf", file_stem="first", file_path="uploads/first.pdf", file_type="pdf", dpi=150)
-        create_job(db, file_name="second.pdf", file_stem="second", file_path="uploads/second.pdf", file_type="pdf", dpi=150)
+        create_job(
+            db,
+            file_name="first.pdf",
+            file_stem="first",
+            file_path="uploads/first.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
+        create_job(
+            db,
+            file_name="second.pdf",
+            file_stem="second",
+            file_path="uploads/second.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
         jobs = list_jobs(db)
         assert jobs[0]["file_name"] == "first.pdf"
 
@@ -98,22 +174,51 @@ class TestListJobs:
 
 class TestUpdateJob:
     def test_updates_to_completed(self, db: sqlite3.Connection) -> None:
-        job_id = create_job(db, file_name="a.pdf", file_stem="a", file_path="uploads/a.pdf", file_type="pdf", dpi=150)
-        update_job(db, job_id, status="completed", page_count=3, duration_ns=5000, result_path="results/a.json", tensor_path="results/a.pt")
+        job_id = create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path="uploads/a.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
+        update_job(
+            db,
+            job_id,
+            status="completed",
+            page_count=3,
+            duration_ns=5000,
+            result_path="results/a.json",
+            tensor_path="results/a.pt",
+        )
         job = get_job(db, job_id)
         assert job["status"] == "completed"
         assert job["page_count"] == 3
         assert job["duration_ns"] == 5000
 
     def test_updates_to_failed(self, db: sqlite3.Connection) -> None:
-        job_id = create_job(db, file_name="a.pdf", file_stem="a", file_path="uploads/a.pdf", file_type="pdf", dpi=150)
+        job_id = create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path="uploads/a.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
         update_job(db, job_id, status="failed", error="corrupt file")
         job = get_job(db, job_id)
         assert job["status"] == "failed"
         assert job["error"] == "corrupt file"
 
     def test_updates_to_processing(self, db: sqlite3.Connection) -> None:
-        job_id = create_job(db, file_name="a.pdf", file_stem="a", file_path="uploads/a.pdf", file_type="pdf", dpi=150)
+        job_id = create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path="uploads/a.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
         update_job(db, job_id, status="processing")
         job = get_job(db, job_id)
         assert job["status"] == "processing"
@@ -121,7 +226,14 @@ class TestUpdateJob:
 
 class TestDeleteJob:
     def test_removes_job(self, db: sqlite3.Connection) -> None:
-        job_id = create_job(db, file_name="a.pdf", file_stem="a", file_path="uploads/a.pdf", file_type="pdf", dpi=150)
+        job_id = create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path="uploads/a.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
         delete_job(db, job_id)
         assert get_job(db, job_id) is None
 
@@ -131,7 +243,14 @@ class TestDeleteJob:
 
 class TestResetProcessingJobs:
     def test_resets_processing_to_pending(self, db: sqlite3.Connection) -> None:
-        job_id = create_job(db, file_name="a.pdf", file_stem="a", file_path="uploads/a.pdf", file_type="pdf", dpi=150)
+        job_id = create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path="uploads/a.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
         update_job(db, job_id, status="processing")
         count = reset_processing_jobs(db)
         assert count == 1
@@ -141,8 +260,22 @@ class TestResetProcessingJobs:
 
 class TestNextPendingJob:
     def test_returns_oldest_pending(self, db: sqlite3.Connection) -> None:
-        create_job(db, file_name="first.pdf", file_stem="first", file_path="uploads/first.pdf", file_type="pdf", dpi=150)
-        create_job(db, file_name="second.pdf", file_stem="second", file_path="uploads/second.pdf", file_type="pdf", dpi=150)
+        create_job(
+            db,
+            file_name="first.pdf",
+            file_stem="first",
+            file_path="uploads/first.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
+        create_job(
+            db,
+            file_name="second.pdf",
+            file_stem="second",
+            file_path="uploads/second.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
         job = next_pending_job(db)
         assert job is not None
         assert job["file_name"] == "first.pdf"
