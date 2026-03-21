@@ -125,6 +125,7 @@ if jobs:
                         with api_client() as client:
                             client.delete(f"/jobs/{job['id']}")
                         st.session_state.pop("search_results", None)
+                        st.session_state.pop("ask_result", None)
                         st.rerun()
                     except httpx.HTTPError as e:
                         st.error(str(e))
@@ -204,6 +205,68 @@ if jobs:
                         )
             else:
                 st.info("No results above the score threshold.")
+
+        # Ask
+        st.subheader("Ask")
+        ask_filter_options = ["All documents"] + [j["file_stem"] for j in completed]
+        ask_filter_ids: list[str | None] = [None] + [j["id"] for j in completed]
+        ask_filter_idx = st.selectbox(
+            "Document filter",
+            range(len(ask_filter_options)),
+            format_func=lambda i: ask_filter_options[i],
+            key="ask_filter",
+        )
+
+        ask_col_topk, ask_col_minscore = st.columns(2)
+        ask_top_k = ask_col_topk.number_input(
+            "Top K", min_value=1, max_value=10, value=3, key="ask_top_k"
+        )
+        ask_min_score = ask_col_minscore.number_input(
+            "Min score", min_value=0.0, value=0.0, step=0.1, key="ask_min_score"
+        )
+
+        ask_query = st.text_input("Question", key="ask_query")
+        if st.button("Ask", key="ask_button"):
+            if not ask_query:
+                st.warning("Enter a question.")
+            else:
+                try:
+                    with api_client() as client:
+                        ask_resp = client.post(
+                            "/ask",
+                            json={
+                                "query": ask_query,
+                                "top_k": ask_top_k,
+                                "min_score": ask_min_score,
+                                "filter_file_id": ask_filter_ids[ask_filter_idx],
+                            },
+                        )
+                        if ask_resp.status_code == 200:
+                            st.session_state.ask_result = ask_resp.json()
+                        elif ask_resp.status_code == 503:
+                            st.warning(
+                                "Answer generation is not configured. "
+                                "Set GENERATION_API_URL and GENERATION_MODEL to enable."
+                            )
+                        else:
+                            st.error(
+                                ask_resp.json().get("detail", "Ask failed")
+                            )
+                except httpx.HTTPError as e:
+                    st.error(str(e))
+
+        if "ask_result" in st.session_state:
+            ask_result = st.session_state.ask_result
+            st.markdown(ask_result["answer"])
+            if ask_result["sources"]:
+                st.caption("Sources:")
+                job_lookup = {j["id"]: j for j in completed}
+                for sr in ask_result["sources"]:
+                    j = job_lookup.get(sr["file_id"])
+                    if j:
+                        st.caption(
+                            f"  {j['file_stem']} · Page {sr['page_index'] + 1} · {sr['score']:.4f}"
+                        )
 
 elif not uploaded_files:
     st.info("Upload files to get started.")
