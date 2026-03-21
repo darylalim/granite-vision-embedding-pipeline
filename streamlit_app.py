@@ -1,23 +1,17 @@
-import json
-import time
-from typing import Any
+import os
 
+import httpx
 import streamlit as st
-from PIL import Image, UnidentifiedImageError
 
 from core.constants import DPI_OPTIONS, IMAGE_EXTENSIONS, MODEL_ID
-from core.embedding import embed, get_device, load_model
-from core.rendering import render_pages
-from core.search import filter_results, search_multi
+
+API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
 
-@st.cache_resource
-def cached_load_model(device: str) -> tuple:
-    """Cache-wrapped model loader for Streamlit."""
-    return load_model(device)
+def api_client() -> httpx.Client:
+    return httpx.Client(base_url=API_URL, timeout=120.0)
 
 
-# UI
 st.set_page_config(page_title="Granite Vision Embedding Pipeline", layout="centered")
 st.title("Granite Vision Embedding Pipeline")
 st.write(
@@ -30,161 +24,139 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True,
 )
 
-device = get_device()
+dpi_label = st.radio("Render DPI", DPI_OPTIONS, index=1, horizontal=True)
+dpi = DPI_OPTIONS[dpi_label]
 
 if uploaded_files:
     total_size_mb = sum(len(f.getvalue()) for f in uploaded_files) / 1_048_576
     st.caption(f"{len(uploaded_files)} file(s) · {total_size_mb:.1f} MB")
 
-    dpi_label = st.radio("Render DPI", DPI_OPTIONS, index=1, horizontal=True)
-    dpi = DPI_OPTIONS[dpi_label]
-
-    # Clean up stale results for removed files
-    if "results" in st.session_state:
-        current_ids = {f.file_id for f in uploaded_files}
-        stale_ids = set(st.session_state.results.keys()) - current_ids
-        for stale_id in stale_ids:
-            del st.session_state.results[stale_id]
-        if stale_ids:
-            st.session_state.pop("search_results", None)
-        if not st.session_state.results:
-            del st.session_state["results"]
-
-    existing_results = st.session_state.get("results", {})
-    files_to_embed = [f for f in uploaded_files if f.file_id not in existing_results]
-
-    col_embed, col_reembed = st.columns(2)
-    embed_clicked = col_embed.button(
-        "Embed", type="primary", disabled=not files_to_embed
-    )
-    reembed_clicked = col_reembed.button("Re-embed All")
-
-    if embed_clicked or reembed_clicked:
-        if reembed_clicked:
-            st.session_state.pop("results", None)
-            files_to_embed = list(uploaded_files)
-
-        if files_to_embed:
-            try:
-                progress = st.progress(0.0, text="Loading model...")
-                model, processor = cached_load_model(device)
-                results: dict[str, Any] = st.session_state.get("results", {})
-
-                for i, f in enumerate(files_to_embed):
-                    file_stem = f.name.rsplit(".", 1)[0]
-                    progress.progress(
-                        i / len(files_to_embed),
-                        text=f"Processing {f.name}...",
+    if st.button("Submit Jobs", type="primary"):
+        with api_client() as client:
+            for f in uploaded_files:
+                try:
+                    resp = client.post(
+                        "/jobs",
+                        files={"file": (f.name, f.getvalue())},
+                        data={"dpi": str(dpi)},
                     )
-                    try:
-                        total_start = time.perf_counter_ns()
-                        ext = f.name.rsplit(".", 1)[-1].lower()
-                        if ext in IMAGE_EXTENSIONS:
-                            try:
-                                image = Image.open(f).convert("RGB")
-                            except (UnidentifiedImageError, OSError) as e:
-                                st.error(f"{f.name}: {e}")
-                                continue
-                            pages = [image]
-                        else:
-                            pages = render_pages(f.read(), dpi=dpi)
-                            if not pages:
-                                st.error(f"{f.name}: PDF contains no pages to embed.")
-                                continue
-                        page_embeddings = embed(pages, model, processor)
-                        total_duration = time.perf_counter_ns() - total_start
+                    if resp.status_code == 201:
+                        st.success(f"Submitted: {f.name}")
+                    else:
+                        st.error(f"{f.name}: {resp.json().get('detail', 'Unknown error')}")
+                except httpx.HTTPError as e:
+                    st.error(f"{f.name}: {e}")
 
-                        results[f.file_id] = {
-                            "file_id": f.file_id,
-                            "pages": pages,
-                            "page_embeddings": page_embeddings,
-                            "total_duration": total_duration,
-                            "file_stem": file_stem,
-                            "dpi": dpi,
-                            "json": json.dumps(
-                                {
-                                    "file_name": file_stem,
-                                    "model": MODEL_ID,
-                                    "dpi": dpi,
-                                    "embeddings": page_embeddings.tolist(),
-                                    "total_duration": total_duration,
-                                    "page_count": len(pages),
-                                }
-                            ),
-                        }
-                    except (OSError, RuntimeError, ValueError) as e:
-                        st.error(f"{f.name}: {e}")
-                    except Exception as e:
-                        st.exception(e)
+# Job Dashboard
+st.subheader("Jobs")
 
-                progress.progress(1.0, text="Complete.")
-                progress.empty()
-                st.session_state.results = results
-                st.session_state.pop("search_results", None)
+col_refresh, col_filter = st.columns([1, 2])
+if col_refresh.button("Refresh"):
+    st.rerun()
 
-            except (OSError, RuntimeError) as e:
-                st.error(str(e))
-            except Exception as e:
-                st.exception(e)
+status_filter = col_filter.selectbox(
+    "Status filter",
+    ["all", "pending", "processing", "completed", "failed"],
+)
 
-    if "results" in st.session_state and st.session_state.results:
-        all_results: dict[str, Any] = st.session_state.results
+try:
+    with api_client() as client:
+        params = {} if status_filter == "all" else {"status": status_filter}
+        resp = client.get("/jobs", params=params)
+        jobs = resp.json() if resp.status_code == 200 else []
+except httpx.HTTPError:
+    jobs = []
+    st.warning("Cannot connect to API server.")
 
-        st.success(f"Embedded {len(all_results)} document(s).")
+if jobs:
+    # Summary metrics
+    completed = [j for j in jobs if j["status"] == "completed"]
+    total_pages = sum(j.get("page_count") or 0 for j in completed)
+    total_duration_ns = sum(j.get("duration_ns") or 0 for j in completed)
 
-        # Summary metrics
-        total_pages = sum(len(r["pages"]) for r in all_results.values())
-        total_duration_ns = sum(r["total_duration"] for r in all_results.values())
-
+    if completed:
         st.subheader("Metrics")
         st.metric("Model", MODEL_ID)
         col1, col2, col3 = st.columns(3)
         col1.metric("Duration", f"{total_duration_ns / 1_000_000_000:.2f} s")
         col2.metric("Pages", total_pages)
-        col3.metric("Documents", len(all_results))
+        col3.metric("Documents", len(completed))
 
-        # Per-document expanders
-        for file_id, r in all_results.items():
-            with st.expander(f"{r['file_stem']} ({len(r['pages'])} pages)"):
-                cols = st.columns(min(len(r["pages"]), 4))
-                for i, page in enumerate(r["pages"]):
-                    cols[i % 4].image(page, caption=f"Page {i + 1}", width="stretch")
-                doc_duration = r["total_duration"] / 1_000_000_000
-                st.caption(
-                    f"Duration: {doc_duration:.2f} s · "
-                    f"Pages: {len(r['pages'])} · DPI: {r['dpi']}"
-                )
-                st.download_button(
-                    label=f"Download {r['file_stem']} JSON",
-                    data=r["json"],
-                    file_name=f"{r['file_stem']}_embedding.json",
-                    mime="application/json",
-                    key=f"download_{file_id}",
-                )
+    for job in jobs:
+        status_emoji = {
+            "pending": "Pending",
+            "processing": "Processing",
+            "completed": "Completed",
+            "failed": "Failed",
+        }.get(job["status"], job["status"])
 
-        # Download All
-        if len(all_results) > 1:
-            all_json = "[" + ",".join(r["json"] for r in all_results.values()) + "]"
-            st.download_button(
-                label="Download All JSON",
-                data=all_json,
-                file_name="all_embeddings.json",
-                mime="application/json",
-                key="download_all",
+        with st.expander(f"{job['file_stem']} — {status_emoji}"):
+            st.caption(
+                f"Status: {job['status']} · Type: {job['file_type']} · DPI: {job['dpi']}"
             )
+            if job.get("page_count"):
+                duration_s = (job.get("duration_ns") or 0) / 1_000_000_000
+                st.caption(f"Pages: {job['page_count']} · Duration: {duration_s:.2f} s")
+            if job.get("error"):
+                st.error(job["error"])
 
-        # Search
+            col_dl, col_del = st.columns(2)
+
+            if job["status"] == "completed":
+                try:
+                    with api_client() as client:
+                        result_resp = client.get(f"/jobs/{job['id']}/result")
+                        if result_resp.status_code == 200:
+                            col_dl.download_button(
+                                f"Download {job['file_stem']} JSON",
+                                data=result_resp.content,
+                                file_name=f"{job['file_stem']}_embedding.json",
+                                mime="application/json",
+                                key=f"dl_{job['id']}",
+                            )
+                except httpx.HTTPError:
+                    pass
+
+            if job["status"] != "processing":
+                if col_del.button("Delete", key=f"del_{job['id']}"):
+                    try:
+                        with api_client() as client:
+                            client.delete(f"/jobs/{job['id']}")
+                        st.rerun()
+                    except httpx.HTTPError as e:
+                        st.error(str(e))
+
+    # Download All
+    if len(completed) > 1:
+        try:
+            with api_client() as client:
+                all_results = []
+                for j in completed:
+                    result_resp = client.get(f"/jobs/{j['id']}/result")
+                    if result_resp.status_code == 200:
+                        all_results.append(result_resp.text)
+                if all_results:
+                    all_json = "[" + ",".join(all_results) + "]"
+                    st.download_button(
+                        "Download All JSON",
+                        data=all_json,
+                        file_name="all_embeddings.json",
+                        mime="application/json",
+                        key="download_all",
+                    )
+        except httpx.HTTPError:
+            pass
+
+    # Search
+    if completed:
         st.subheader("Search")
-        filter_options = ["All documents"] + [
-            r["file_stem"] for r in all_results.values()
-        ]
-        filter_file_ids: list[str | None] = [None] + list(all_results.keys())
+        filter_options = ["All documents"] + [j["file_stem"] for j in completed]
+        filter_ids: list[str | None] = [None] + [j["id"] for j in completed]
         filter_idx = st.selectbox(
             "Document filter",
             range(len(filter_options)),
             format_func=lambda i: filter_options[i],
         )
-        selected_file_id = filter_file_ids[filter_idx]
 
         col_topk, col_minscore = st.columns(2)
         top_k = col_topk.number_input("Top K", min_value=1, max_value=100, value=5)
@@ -198,39 +170,45 @@ if uploaded_files:
                 st.warning("Enter a search query.")
             else:
                 try:
-                    model, processor = cached_load_model(device)
-                    embeddings_map = {
-                        fid: r["page_embeddings"] for fid, r in all_results.items()
-                    }
-                    raw_results = search_multi(
-                        query,
-                        model,
-                        processor,
-                        embeddings_map,
-                        filter_file_id=selected_file_id,
-                    )
-                    st.session_state.search_results = filter_results(
-                        raw_results, top_k=top_k, min_score=min_score
-                    )
-                except (OSError, RuntimeError, ValueError) as e:
+                    with api_client() as client:
+                        search_resp = client.post(
+                            "/search",
+                            json={
+                                "query": query,
+                                "top_k": top_k,
+                                "min_score": min_score,
+                                "filter_file_id": filter_ids[filter_idx],
+                            },
+                        )
+                        if search_resp.status_code == 200:
+                            st.session_state.search_results = search_resp.json()["results"]
+                        else:
+                            st.error(search_resp.json().get("detail", "Search failed"))
+                except httpx.HTTPError as e:
                     st.error(str(e))
-                except Exception as e:
-                    st.exception(e)
 
         if "search_results" in st.session_state:
             search_results = st.session_state.search_results
             if search_results:
-                cols = st.columns(min(len(search_results), 4))
-                for rank, (fid, page_idx, score) in enumerate(search_results):
-                    r = all_results[fid]
-                    cols[rank % 4].image(
-                        r["pages"][page_idx],
-                        caption=(
-                            f"{r['file_stem']} · Page {page_idx + 1} · {score:.4f}"
-                        ),
-                        width="stretch",
-                    )
+                job_lookup = {j["id"]: j for j in completed}
+                for rank, sr in enumerate(search_results):
+                    j = job_lookup.get(sr["file_id"])
+                    if j:
+                        st.caption(
+                            f"{j['file_stem']} · Page {sr['page_index'] + 1} · {sr['score']:.4f}"
+                        )
             else:
                 st.info("No results above the score threshold.")
 
-st.caption(f"Device: {device.upper()}")
+elif not uploaded_files:
+    st.info("Upload files to get started.")
+
+# Footer
+try:
+    with api_client() as client:
+        health = client.get("/health").json()
+        device = health.get("device", "unknown").upper()
+        queue_depth = health.get("queue_depth", 0)
+        st.caption(f"Device: {device} · Queue: {queue_depth}")
+except httpx.HTTPError:
+    st.caption("API server not connected")
