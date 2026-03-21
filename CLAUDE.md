@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Streamlit web app + FastAPI backend for generating vector embeddings from PDF documents and images and searching over them using IBM Granite's [Vision Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding) model. Supports batch processing of thousands of documents via a job queue.
+Streamlit + FastAPI app for generating vector embeddings from PDF documents and images using IBM Granite's [Vision Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding) model, with batch processing via a SQLite job queue.
 
 ## Setup
 
@@ -33,25 +33,28 @@ uv run streamlit run streamlit_app.py
 
 ## Dependencies
 
+- `fastapi` — REST API framework
+- `uvicorn` — ASGI server
+- `httpx` — HTTP client (Streamlit → API)
+- `python-multipart` — file upload handling
 - `transformers` — Hugging Face model loading (`AutoModel`, `AutoProcessor`)
 - `pymupdf` — PDF page rendering
 - `torch` — tensor operations
 - `streamlit` — web user interface
-- `fastapi` — REST API framework
-- `uvicorn` — ASGI server
-- `httpx` — HTTP client for Streamlit → API communication
-- `python-multipart` — file upload handling
 - `ruff` — linting/formatting (dev)
 - `ty` — type checking (dev)
 - `pytest` — testing (dev)
 
 ## Configuration
 
-- `pyproject.toml` — project metadata, dependencies, dev dependency group, ruff lint isort (`combine-as-imports`), ty (`python-version = "3.12"`)
-- `API_URL` env var — API base URL (default: `http://localhost:8000`)
-- `UPLOAD_DIR` env var — upload directory (default: `uploads/`)
-- `RESULT_DIR` env var — results directory (default: `results/`)
-- `DATABASE_PATH` env var — SQLite path (default: `data/jobs.db`)
+`pyproject.toml` — project metadata, dependencies, dev dependency group, ruff lint isort (`combine-as-imports`), ty (`python-version = "3.12"`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_URL` | `http://localhost:8000` | API base URL (Streamlit) |
+| `UPLOAD_DIR` | `uploads/` | Uploaded file storage |
+| `RESULT_DIR` | `results/` | Embedding output storage |
+| `DATABASE_PATH` | `data/jobs.db` | SQLite database path |
 
 ## Architecture
 
@@ -68,14 +71,14 @@ Streamlit UI  →  FastAPI Backend  →  Embedding Worker (background thread)
 ### Entry Points
 
 - `streamlit_app.py` — thin API client (Streamlit UI)
-- `api/app.py` — FastAPI backend with `create_app()` factory
+- `api/app.py` — FastAPI backend (`create_app()` factory)
 
 ### Core Module (`core/`)
 
 Pure logic with no Streamlit or FastAPI dependencies:
 
 - `core/constants.py` — `MODEL_ID`, `DPI_OPTIONS`, `IMAGE_EXTENSIONS`, `MAX_UPLOAD_BYTES`
-- `core/types.py` — `EmbeddingProcessor` Protocol
+- `core/types.py` — `EmbeddingProcessor` protocol
 - `core/embedding.py` — `get_device`, `load_model`, `load_image`, `embed`
 - `core/rendering.py` — `render_pages`
 - `core/search.py` — `search_multi`, `filter_results`
@@ -83,9 +86,9 @@ Pure logic with no Streamlit or FastAPI dependencies:
 ### API Module (`api/`)
 
 - `api/app.py` — FastAPI routes (`create_app()` factory)
-- `api/database.py` — SQLite connection, schema, job CRUD queries
-- `api/worker.py` — `EmbeddingWorker` background thread with job processing and search
 - `api/models.py` — Pydantic request/response models
+- `api/database.py` — SQLite connection, schema, job CRUD
+- `api/worker.py` — `EmbeddingWorker` background thread
 
 ### Embedding Model
 
@@ -93,15 +96,15 @@ Pure logic with no Streamlit or FastAPI dependencies:
 
 ### Pipeline
 
-Upload files → API saves to `uploads/` and creates SQLite job → Worker thread picks up pending jobs → render PDF pages as images at configurable DPI or load images directly → embed with model → save JSON + `.pt` tensor to `results/` → mark completed → Streamlit polls for status
+Upload files → API saves to `uploads/` and creates SQLite job → worker picks up pending jobs (FIFO) → renders PDF pages or loads images → embeds with model → saves JSON + `.pt` to `results/` → marks completed → Streamlit polls for status
 
 ### Worker
 
 - Background thread started during FastAPI lifespan
-- Loads model once at startup, reuses for all jobs and search
+- Loads model once, reuses for all jobs and search
 - Polls SQLite for pending jobs (FIFO by `created_at`)
-- Search requests serialized via `queue.Queue` + `concurrent.futures.Future`
-- LRU tensor cache (max 500 entries) for fast search
+- Search serialized via `queue.Queue` + `concurrent.futures.Future`
+- LRU tensor cache (max 500 entries) for search
 
 ### Performance
 
@@ -121,45 +124,46 @@ Upload files → API saves to `uploads/` and creates SQLite job → Worker threa
 ### API Routes
 
 ```
-POST   /jobs              Upload file + DPI → save file, create job, return job ID
-GET    /jobs              List all jobs (optional ?status= filter)
-GET    /jobs/{id}         Get single job status and metadata
+POST   /jobs              Upload file + DPI, returns job ID (201)
+GET    /jobs              List jobs, optional ?status= filter
+GET    /jobs/{id}         Single job status and metadata
 DELETE /jobs/{id}         Delete job and files (409 if processing)
 GET    /jobs/{id}/result  Download embedding JSON
-POST   /search            Text query → ranked results via worker
+POST   /search            Text query, returns ranked results
 GET    /health            Device, queue depth, worker status
 ```
 
 ### Database
 
-SQLite `jobs` table with fields: `id`, `status` (pending/processing/completed/failed), `created_at`, `updated_at`, `file_name`, `file_stem`, `file_path`, `file_type`, `dpi`, `page_count`, `duration_ns`, `result_path`, `tensor_path`, `error`.
+SQLite `jobs` table: `id`, `status` (pending/processing/completed/failed), `created_at`, `updated_at`, `file_name`, `file_stem`, `file_path`, `file_type`, `dpi`, `page_count`, `duration_ns`, `result_path`, `tensor_path`, `error`
 
-### JSON Download
+### JSON Output
 
-Per-document download via API, plus "Download All" in Streamlit. Fields per document:
+Fields per document:
 
 - `file_name` (string) — file stem without extension
-- `model` (string) — model that produced the embeddings
-- `dpi` (integer) — render resolution in dots per inch (72–300)
-- `embeddings` (number[][][]) — per-page multi-vector embeddings (page → patches → 128-dim vectors)
-- `total_duration` (integer) — total duration in nanoseconds
-- `page_count` (integer) — number of PDF pages processed
+- `model` (string) — model ID
+- `dpi` (integer) — render DPI (72–300)
+- `embeddings` (number[][][]) — per-page multi-vector embeddings (page → patches → 128-dim)
+- `total_duration` (integer) — nanoseconds
+- `page_count` (integer) — pages processed
 
 ### Search
 
-Text query submitted to `POST /search`, dispatched to worker thread which scores against page embeddings across all completed documents via `search_multi`. Results filtered by `filter_results` (min score threshold + top-K). Optional document filter via `filter_file_id`.
+`POST /search` dispatches to worker thread, which scores query against page embeddings via `search_multi`, then applies `filter_results` (min score + top-K). Optional `filter_file_id` restricts to one document.
 
 ### Error Handling
 
-- Invalid file types rejected with 400
-- Files over 50 MB rejected with 400
-- Processing jobs cannot be deleted (409)
-- Failed jobs store sanitized error message (no stack traces)
+- Invalid file types → 400
+- Files over 50 MB → 400
+- Delete processing job → 409
+- Failed jobs store sanitized error (no stack traces)
+- Empty/corrupt PDFs → job marked failed
 - Streamlit shows API connection errors gracefully
 
 ## Tests
 
-- `tests/test_core.py` — unit tests for core functions: `TestDpiOptions`, `TestImageExtensions`, `TestLoadImage`, `TestGetDevice`, `TestRenderPages`, `TestEmbed`, `TestFilterResults`, `TestSearchMulti`
+- `tests/test_core.py` — core functions: `TestDpiOptions`, `TestImageExtensions`, `TestMaxUploadBytes`, `TestLoadImage`, `TestGetDevice`, `TestRenderPages`, `TestEmbed`, `TestFilterResults`, `TestSearchMulti`
 - `tests/test_database.py` — SQLite job management: `TestInitDb`, `TestCreateJob`, `TestGetJob`, `TestListJobs`, `TestUpdateJob`, `TestDeleteJob`, `TestResetProcessingJobs`, `TestNextPendingJob`
 - `tests/test_worker.py` — embedding worker: `TestProcessJob`, `TestStartupRecovery`, `TestTensorCache`, `TestSearchDispatch`
 - `tests/test_api.py` — FastAPI routes: `TestHealth`, `TestUploadJob`, `TestListJobs`, `TestGetJob`, `TestDeleteJob`, `TestGetResult`, `TestSearch`

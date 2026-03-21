@@ -1,21 +1,31 @@
 # Granite Vision Embedding Pipeline
 
-Streamlit web app for generating vector embeddings from PDF documents and images and searching over them using IBM Granite's [Vision Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding) model.
+Streamlit + FastAPI app for generating vector embeddings from PDF documents and images using IBM Granite's [Vision Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding) model, with batch processing via a SQLite job queue.
 
 ## Features
 
-- Multi-PDF and image upload (PNG, JPG, JPEG, WebP) with batch or incremental embedding
+- Upload PDFs and images (PNG, JPG, JPEG, WebP) in bulk
 - PDF page rendering at configurable DPI (72, 150, 300) via [PyMuPDF](https://pymupdf.readthedocs.io/)
 - Multi-vector embeddings with [Granite Vision 3.3 2B Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding)
+- Batch processing of thousands of documents via background worker thread
 - Cross-document text search with top-K and score threshold filtering
-- Optional per-document search filtering
+- Per-document and combined JSON embedding downloads
 - Automatic device selection (MPS > CUDA > CPU)
-- Per-document and combined JSON downloads with embeddings, DPI, and timing
+- Job dashboard with status tracking, filtering, and deletion
 
 ## Setup
 
 ```bash
 uv sync
+```
+
+Start the API server and Streamlit UI in separate terminals:
+
+```bash
+# Terminal 1: API server
+uv run uvicorn api.app:create_app --factory --port 8000
+
+# Terminal 2: Streamlit UI
 uv run streamlit run streamlit_app.py
 ```
 
@@ -27,3 +37,12 @@ uv run ruff format .  # format
 uv run ty check       # typecheck
 uv run pytest         # test
 ```
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_URL` | `http://localhost:8000` | API base URL (Streamlit) |
+| `UPLOAD_DIR` | `uploads/` | Uploaded file storage |
+| `RESULT_DIR` | `results/` | Embedding output storage |
+| `DATABASE_PATH` | `data/jobs.db` | SQLite database path |

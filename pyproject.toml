@@ -1,7 +1,7 @@
 [project]
 name = "granite-vision-embedding-pipeline"
 version = "0.1.0"
-description = "Streamlit web app for generating vector embeddings from PDF documents and images and searching over them using IBM Granite's Vision Embedding model."
+description = "Streamlit + FastAPI app for generating vector embeddings from PDF documents and images using IBM Granite's Vision Embedding model, with batch processing via a SQLite job queue."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
