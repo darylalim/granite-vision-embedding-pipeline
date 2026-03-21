@@ -27,7 +27,12 @@ from api.models import (
     SearchResult,
 )
 from api.worker import EmbeddingWorker
-from core.constants import DPI_OPTIONS, GENERATION_MAX_TOKENS, IMAGE_EXTENSIONS, MAX_UPLOAD_BYTES
+from core.constants import (
+    DPI_OPTIONS,
+    GENERATION_MAX_TOKENS,
+    IMAGE_EXTENSIONS,
+    MAX_UPLOAD_BYTES,
+)
 from core.embedding import get_device, load_image
 from core.generation import build_messages
 from core.rendering import render_page
@@ -258,9 +263,7 @@ def create_app() -> FastAPI:
                     image = render_page(pdf_data, page_index, dpi=job["dpi"])
                 images.append(image)
                 sources.append(
-                    SearchResult(
-                        file_id=file_id, page_index=page_index, score=score
-                    )
+                    SearchResult(file_id=file_id, page_index=page_index, score=score)
                 )
             except Exception:
                 continue
@@ -273,9 +276,7 @@ def create_app() -> FastAPI:
         # Call VLM
         messages = build_messages(req.query, images)
         generation_api_key = os.environ.get("GENERATION_API_KEY", "")
-        max_tokens = int(
-            os.environ.get("GENERATION_MAX_TOKENS", GENERATION_MAX_TOKENS)
-        )
+        max_tokens = int(os.environ.get("GENERATION_MAX_TOKENS", GENERATION_MAX_TOKENS))
 
         timeout = float(os.environ.get("GENERATION_TIMEOUT", 120.0))
 
@@ -291,9 +292,7 @@ def create_app() -> FastAPI:
                     },
                 )
         except (httpx.TimeoutException, httpx.ConnectError):
-            raise HTTPException(
-                502, detail="Unable to reach generation service."
-            )
+            raise HTTPException(502, detail="Unable to reach generation service.")
 
         if vlm_resp.status_code != 200:
             raise HTTPException(502, detail="Generation service error.")

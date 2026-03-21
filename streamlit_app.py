@@ -249,9 +249,7 @@ if jobs:
                                 "Set GENERATION_API_URL and GENERATION_MODEL to enable."
                             )
                         else:
-                            st.error(
-                                ask_resp.json().get("detail", "Ask failed")
-                            )
+                            st.error(ask_resp.json().get("detail", "Ask failed"))
                 except httpx.HTTPError as e:
                     st.error(str(e))
 

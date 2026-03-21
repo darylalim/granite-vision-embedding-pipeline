@@ -6,7 +6,12 @@ import torch
 from PIL import Image, UnidentifiedImageError
 from pytest import approx
 
-from core.constants import DPI_OPTIONS, GENERATION_MAX_TOKENS, IMAGE_EXTENSIONS, MAX_UPLOAD_BYTES
+from core.constants import (
+    DPI_OPTIONS,
+    GENERATION_MAX_TOKENS,
+    IMAGE_EXTENSIONS,
+    MAX_UPLOAD_BYTES,
+)
 from core.embedding import embed, get_device, load_image
 from core.rendering import render_page, render_pages
 from core.search import filter_results, search_multi

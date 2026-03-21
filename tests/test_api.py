@@ -350,7 +350,11 @@ class TestAsk:
     def test_returns_503_when_not_configured(self, api: ApiFixture) -> None:
         import os
 
-        env = {k: v for k, v in os.environ.items() if k not in ("GENERATION_API_URL", "GENERATION_MODEL")}
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("GENERATION_API_URL", "GENERATION_MODEL")
+        }
         with patch.dict("os.environ", env, clear=True):
             resp = api.client.post("/ask", json={"query": "test"})
         assert resp.status_code == 503
@@ -385,9 +389,7 @@ class TestAsk:
         mock_vlm_response = httpx.Response(
             200,
             json={
-                "choices": [
-                    {"message": {"content": "The document shows a test page."}}
-                ]
+                "choices": [{"message": {"content": "The document shows a test page."}}]
             },
         )
 
