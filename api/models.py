@@ -41,3 +41,15 @@ class HealthResponse(BaseModel):
     device: str
     queue_depth: int
     worker_running: bool
+
+
+class AskRequest(BaseModel):
+    query: str
+    top_k: int = Field(default=3, ge=1, le=10)
+    min_score: float = Field(default=0.0, ge=0.0)
+    filter_file_id: str | None = None
+
+
+class AskResponse(BaseModel):
+    answer: str
+    sources: list[SearchResult]
