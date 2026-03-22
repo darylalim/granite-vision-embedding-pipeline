@@ -12,7 +12,7 @@ from core.constants import (
     IMAGE_EXTENSIONS,
     MAX_UPLOAD_BYTES,
 )
-from core.embedding import embed, get_device, load_image
+from core.embedding import embed, get_device, load_image, load_model
 from core.rendering import render_page, render_pages
 from core.search import filter_results, search_multi
 
@@ -105,6 +105,59 @@ class TestLoadImage:
         corrupt_file.write_bytes(b"not an image")
         with pytest.raises(UnidentifiedImageError):
             load_image(corrupt_file)
+
+
+def _make_chainable_model(mock_auto_model: MagicMock) -> MagicMock:
+    """Configure mock AutoModel to return a chainable mock for .to().eval()."""
+    mock_model = MagicMock()
+    mock_model.to.return_value = mock_model
+    mock_model.eval.return_value = mock_model
+    mock_auto_model.from_pretrained.return_value = mock_model
+    return mock_model
+
+
+class TestLoadModel:
+    @patch("core.embedding.AutoProcessor")
+    @patch("core.embedding.AutoModel")
+    def test_moves_model_to_device(
+        self, mock_auto_model: MagicMock, mock_auto_processor: MagicMock
+    ) -> None:
+        mock_model = _make_chainable_model(mock_auto_model)
+
+        load_model("cpu")
+
+        mock_auto_model.from_pretrained.assert_called_once()
+        call_kwargs = mock_auto_model.from_pretrained.call_args.kwargs
+        assert "device_map" not in call_kwargs
+        mock_model.to.assert_called_once_with("cpu")
+        mock_model.eval.assert_called_once()
+
+    @patch("core.embedding.AutoProcessor")
+    @patch("core.embedding.AutoModel")
+    def test_processor_uses_fast_tokenizer(
+        self, mock_auto_model: MagicMock, mock_auto_processor: MagicMock
+    ) -> None:
+        _make_chainable_model(mock_auto_model)
+
+        load_model("cpu")
+
+        mock_auto_processor.from_pretrained.assert_called_once()
+        call_kwargs = mock_auto_processor.from_pretrained.call_args.kwargs
+        assert call_kwargs["use_fast"] is True
+
+    @patch("core.embedding.AutoProcessor")
+    @patch("core.embedding.AutoModel")
+    def test_returns_model_and_processor(
+        self, mock_auto_model: MagicMock, mock_auto_processor: MagicMock
+    ) -> None:
+        mock_model = _make_chainable_model(mock_auto_model)
+        mock_proc = MagicMock()
+        mock_auto_processor.from_pretrained.return_value = mock_proc
+
+        model, processor = load_model("cpu")
+
+        assert model is mock_model
+        assert processor is mock_proc
 
 
 class TestGetDevice:
