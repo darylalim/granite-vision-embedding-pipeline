@@ -40,6 +40,7 @@ uv run streamlit run streamlit_app.py
 - `transformers` — Hugging Face model loading (`AutoModel`, `AutoProcessor`)
 - `pymupdf` — PDF page rendering
 - `torch` — tensor operations
+- `torchvision` — required by Granite model remote code
 - `streamlit` — web user interface
 - `ruff` — linting/formatting (dev)
 - `ty` — type checking (dev)
@@ -179,7 +180,7 @@ Fields per document:
 
 ## Tests
 
-- `tests/test_core.py` — core functions: `TestDpiOptions`, `TestImageExtensions`, `TestMaxUploadBytes`, `TestGenerationMaxTokens`, `TestLoadImage`, `TestGetDevice`, `TestRenderPages`, `TestRenderPage`, `TestEmbed`, `TestFilterResults`, `TestSearchMulti`
+- `tests/test_core.py` — core functions: `TestDpiOptions`, `TestImageExtensions`, `TestMaxUploadBytes`, `TestGenerationMaxTokens`, `TestLoadImage`, `TestLoadModel`, `TestGetDevice`, `TestRenderPages`, `TestRenderPage`, `TestEmbed`, `TestFilterResults`, `TestSearchMulti`
 - `tests/test_generation.py` — generation functions: `TestEncodeImage`, `TestBuildMessages`
 - `tests/test_database.py` — SQLite job management: `TestInitDb`, `TestCreateJob`, `TestGetJob`, `TestListJobs`, `TestUpdateJob`, `TestDeleteJob`, `TestResetProcessingJobs`, `TestNextPendingJob`
 - `tests/test_worker.py` — embedding worker: `TestProcessJob`, `TestStartupRecovery`, `TestTensorCache`, `TestSearchDispatch`
