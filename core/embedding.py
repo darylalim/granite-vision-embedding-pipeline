@@ -20,13 +20,18 @@ def get_device() -> str:
 
 def load_model(device: str) -> tuple[Any, Any]:
     """Load embedding model and processor."""
-    model = AutoModel.from_pretrained(
-        MODEL_ID,
-        torch_dtype=torch.float16,
-        device_map=device,
-        trust_remote_code=True,
-    ).eval()
-    processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+    model = (
+        AutoModel.from_pretrained(
+            MODEL_ID,
+            torch_dtype=torch.float16,
+            trust_remote_code=True,
+        )
+        .to(device)
+        .eval()
+    )
+    processor = AutoProcessor.from_pretrained(
+        MODEL_ID, trust_remote_code=True, use_fast=True
+    )
     return model, processor
 
 
