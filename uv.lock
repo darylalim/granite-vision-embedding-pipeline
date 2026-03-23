@@ -228,6 +228,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "pandas" },
     { name = "pymupdf" },
     { name = "python-multipart" },
     { name = "streamlit" },
@@ -248,6 +249,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.28" },
+    { name = "pandas", specifier = ">=2.3.3" },
     { name = "pymupdf", specifier = ">=1.25.0" },
     { name = "python-multipart", specifier = ">=0.0.18" },
     { name = "streamlit", specifier = "==1.52.2" },
