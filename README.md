@@ -40,6 +40,32 @@ uv run ty check       # typecheck
 uv run pytest         # test
 ```
 
+## Architecture
+
+```
+streamlit_app.py          Streamlit UI (cached httpx client, batch polling)
+api/
+  app.py                  FastAPI routes, _cleanup_job_files(), _run_search()
+  models.py               Pydantic request/response schemas
+  database.py             SQLite connection, schema, job CRUD (indexed)
+  worker.py               Background embedding worker thread
+core/
+  constants.py            MODEL_ID, DPI_OPTIONS, limits
+  types.py                EmbeddingProcessor protocol
+  embedding.py            Model loading, image loading, embed()
+  rendering.py            PDF page rendering (PyMuPDF)
+  search.py               Embedding search + filtering
+  generation.py           Image encoding, VLM message building
+tests/
+  conftest.py             Shared fixtures (db, dirs)
+  factories.py            Shared mock factories
+  test_core.py            Core function tests
+  test_generation.py      Generation function tests
+  test_database.py        SQLite job management tests
+  test_worker.py          Worker thread tests
+  test_api.py             API helper and route tests
+```
+
 ## Configuration
 
 | Variable | Default | Description |

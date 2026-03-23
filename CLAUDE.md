@@ -93,7 +93,7 @@ Pure logic with no Streamlit or FastAPI dependencies:
 
 ### API Module (`api/`)
 
-- `api/app.py` — FastAPI routes (`create_app()` factory)
+- `api/app.py` — FastAPI routes (`create_app()` factory), `_cleanup_job_files()` helper, `_run_search()` helper
 - `api/models.py` — Pydantic request/response models
 - `api/database.py` — SQLite connection, schema, job CRUD, bulk delete
 - `api/worker.py` — `EmbeddingWorker` background thread
@@ -123,8 +123,13 @@ Upload files → API saves to `uploads/` and creates SQLite job → worker picks
 - Best available device: MPS > CUDA > CPU
 - `torch.inference_mode()` for inference
 - `torch.float16` for model precision
+- `.cpu()` before `torch.save` and `.tolist()` for portability and faster serialization
 - `time.perf_counter_ns()` for timing (nanoseconds)
 - SQLite WAL mode + busy_timeout for concurrent access
+- Composite index on `(status, created_at)` for job queries
+- Cached `httpx.Client` via `@st.cache_resource` in Streamlit (single connection pool)
+- Batch job status polling (one `GET /jobs` per cycle instead of per-job requests)
+- PDF byte and job lookup caching per document in `/ask` to avoid duplicate reads
 
 ### Constants
 
@@ -151,6 +156,8 @@ GET    /health            Device, queue depth, worker status
 ### Database
 
 SQLite `jobs` table: `id`, `status` (pending/processing/completed/failed), `created_at`, `updated_at`, `file_name`, `file_stem`, `file_path`, `file_type`, `dpi`, `page_count`, `duration_ns`, `result_path`, `tensor_path`, `error`
+
+Index: `idx_jobs_status_created` on `(status, created_at)`
 
 ### JSON Output
 
@@ -181,11 +188,13 @@ Fields per document:
 
 ## Tests
 
+- `tests/conftest.py` — shared fixtures: `db`, `dirs`
+- `tests/factories.py` — shared mock factories: `make_mock_model`, `make_image_processor`, `make_query_processor`, `make_mock_processor`
 - `tests/test_core.py` — core functions: `TestDpiOptions`, `TestImageExtensions`, `TestMaxUploadBytes`, `TestGenerationMaxTokens`, `TestLoadImage`, `TestLoadModel`, `TestGetDevice`, `TestRenderPages`, `TestRenderPage`, `TestEmbed`, `TestFilterResults`, `TestSearchMulti`
 - `tests/test_generation.py` — generation functions: `TestEncodeImage`, `TestBuildMessages`
 - `tests/test_database.py` — SQLite job management: `TestInitDb`, `TestCreateJob`, `TestGetJob`, `TestListJobs`, `TestUpdateJob`, `TestDeleteJob`, `TestDeleteAllJobs`, `TestResetProcessingJobs`, `TestNextPendingJob`
 - `tests/test_worker.py` — embedding worker: `TestProcessJob`, `TestStartupRecovery`, `TestTensorCache`, `TestSearchDispatch`
-- `tests/test_api.py` — FastAPI routes: `TestHealth`, `TestUploadJob`, `TestListJobs`, `TestGetJob`, `TestDeleteJob`, `TestDeleteAllJobs`, `TestGetResult`, `TestSearch`, `TestAsk`
+- `tests/test_api.py` — API helpers and routes: `TestCleanupJobFiles`, `TestHealth`, `TestUploadJob`, `TestListJobs`, `TestGetJob`, `TestDeleteJob`, `TestDeleteAllJobs`, `TestGetResult`, `TestSearch`, `TestAsk`
 - `tests/data/pdf/single_page.pdf` — single-page PDF fixture
 - `tests/data/pdf/multi_page.pdf` — multi-page PDF fixture (3 pages)
 - `tests/data/images/red.png` — PNG image fixture
