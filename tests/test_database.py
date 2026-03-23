@@ -5,6 +5,7 @@ import pytest
 
 from api.database import (
     create_job,
+    delete_all_jobs,
     delete_job,
     get_connection,
     get_job,
@@ -282,3 +283,53 @@ class TestNextPendingJob:
 
     def test_returns_none_when_empty(self, db: sqlite3.Connection) -> None:
         assert next_pending_job(db) is None
+
+
+class TestDeleteAllJobs:
+    def test_deletes_non_processing_jobs(self, db: sqlite3.Connection) -> None:
+        create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path="uploads/a.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
+        create_job(
+            db,
+            file_name="b.pdf",
+            file_stem="b",
+            file_path="uploads/b.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
+        count = delete_all_jobs(db)
+        assert count == 2
+        assert list_jobs(db) == []
+
+    def test_preserves_processing_jobs(self, db: sqlite3.Connection) -> None:
+        job_id = create_job(
+            db,
+            file_name="a.pdf",
+            file_stem="a",
+            file_path="uploads/a.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
+        update_job(db, job_id, status="processing")
+        create_job(
+            db,
+            file_name="b.pdf",
+            file_stem="b",
+            file_path="uploads/b.pdf",
+            file_type="pdf",
+            dpi=150,
+        )
+        count = delete_all_jobs(db)
+        assert count == 1
+        remaining = list_jobs(db)
+        assert len(remaining) == 1
+        assert remaining[0]["status"] == "processing"
+
+    def test_returns_zero_when_empty(self, db: sqlite3.Connection) -> None:
+        assert delete_all_jobs(db) == 0

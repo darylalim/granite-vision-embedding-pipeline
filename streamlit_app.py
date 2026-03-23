@@ -52,9 +52,18 @@ if uploaded_files:
 # Job Dashboard
 st.subheader("Jobs")
 
-col_refresh, col_filter = st.columns([1, 2])
+col_refresh, col_delete_all, col_filter = st.columns([1, 1, 2])
 if col_refresh.button("Refresh"):
     st.rerun()
+if col_delete_all.button("Delete All"):
+    try:
+        with api_client() as client:
+            client.delete("/jobs")
+        st.session_state.pop("search_results", None)
+        st.session_state.pop("ask_result", None)
+        st.rerun()
+    except httpx.HTTPError as e:
+        st.error(str(e))
 
 status_filter = col_filter.selectbox(
     "Status filter",

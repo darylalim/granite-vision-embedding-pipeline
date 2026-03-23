@@ -124,6 +124,13 @@ def reset_processing_jobs(conn: sqlite3.Connection) -> int:
     return cursor.rowcount
 
 
+def delete_all_jobs(conn: sqlite3.Connection) -> int:
+    """Delete all non-processing jobs. Returns count deleted."""
+    cursor = conn.execute("DELETE FROM jobs WHERE status != 'processing'")
+    conn.commit()
+    return cursor.rowcount
+
+
 def next_pending_job(conn: sqlite3.Connection) -> dict | None:
     """Fetch the oldest pending job, or None."""
     cursor = conn.execute(

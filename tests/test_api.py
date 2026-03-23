@@ -243,6 +243,87 @@ class TestDeleteJob:
         assert not tensor_path.exists()
 
 
+class TestDeleteAllJobs:
+    def test_deletes_all_and_returns_count(self, api: ApiFixture) -> None:
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        api.client.post(
+            "/jobs",
+            files={"file": ("a.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        api.client.post(
+            "/jobs",
+            files={"file": ("b.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        resp = api.client.delete("/jobs")
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 2
+        assert api.client.get("/jobs").json() == []
+
+    def test_preserves_processing_jobs(self, api: ApiFixture) -> None:
+        from api.database import update_job
+
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("a.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        job_id = create_resp.json()["job_id"]
+        update_job(api.db, job_id, status="processing")
+
+        api.client.post(
+            "/jobs",
+            files={"file": ("b.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+
+        resp = api.client.delete("/jobs")
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 1
+        remaining = api.client.get("/jobs").json()
+        assert len(remaining) == 1
+        assert remaining[0]["id"] == job_id
+
+    def test_cleans_up_files(self, api: ApiFixture) -> None:
+        from api.database import update_job
+
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        create_resp = api.client.post(
+            "/jobs",
+            files={"file": ("a.pdf", pdf_data, "application/pdf")},
+            data={"dpi": "150"},
+        )
+        job_id = create_resp.json()["job_id"]
+
+        results_dir = api.results_dir
+        result_path = results_dir / f"{job_id}.json"
+        tensor_path = results_dir / f"{job_id}.pt"
+        result_path.write_text("{}")
+        tensor_path.write_bytes(b"fake")
+
+        update_job(
+            api.db,
+            job_id,
+            status="completed",
+            page_count=1,
+            duration_ns=100,
+            result_path=str(result_path),
+            tensor_path=str(tensor_path),
+        )
+
+        resp = api.client.delete("/jobs")
+        assert resp.status_code == 200
+        assert not result_path.exists()
+        assert not tensor_path.exists()
+
+    def test_returns_zero_when_empty(self, api: ApiFixture) -> None:
+        resp = api.client.delete("/jobs")
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 0
+
+
 class TestGetResult:
     def test_returns_404_for_pending(self, api: ApiFixture) -> None:
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()

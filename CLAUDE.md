@@ -95,7 +95,7 @@ Pure logic with no Streamlit or FastAPI dependencies:
 
 - `api/app.py` — FastAPI routes (`create_app()` factory)
 - `api/models.py` — Pydantic request/response models
-- `api/database.py` — SQLite connection, schema, job CRUD
+- `api/database.py` — SQLite connection, schema, job CRUD, bulk delete
 - `api/worker.py` — `EmbeddingWorker` background thread
 
 ### Embedding Model
@@ -139,6 +139,7 @@ Upload files → API saves to `uploads/` and creates SQLite job → worker picks
 ```
 POST   /jobs              Upload file + DPI, returns job ID (201)
 GET    /jobs              List jobs, optional ?status= filter
+DELETE /jobs              Delete all non-processing jobs and files (200, returns count)
 GET    /jobs/{id}         Single job status and metadata
 DELETE /jobs/{id}         Delete job and files (409 if processing)
 GET    /jobs/{id}/result  Download embedding JSON
@@ -182,9 +183,9 @@ Fields per document:
 
 - `tests/test_core.py` — core functions: `TestDpiOptions`, `TestImageExtensions`, `TestMaxUploadBytes`, `TestGenerationMaxTokens`, `TestLoadImage`, `TestLoadModel`, `TestGetDevice`, `TestRenderPages`, `TestRenderPage`, `TestEmbed`, `TestFilterResults`, `TestSearchMulti`
 - `tests/test_generation.py` — generation functions: `TestEncodeImage`, `TestBuildMessages`
-- `tests/test_database.py` — SQLite job management: `TestInitDb`, `TestCreateJob`, `TestGetJob`, `TestListJobs`, `TestUpdateJob`, `TestDeleteJob`, `TestResetProcessingJobs`, `TestNextPendingJob`
+- `tests/test_database.py` — SQLite job management: `TestInitDb`, `TestCreateJob`, `TestGetJob`, `TestListJobs`, `TestUpdateJob`, `TestDeleteJob`, `TestDeleteAllJobs`, `TestResetProcessingJobs`, `TestNextPendingJob`
 - `tests/test_worker.py` — embedding worker: `TestProcessJob`, `TestStartupRecovery`, `TestTensorCache`, `TestSearchDispatch`
-- `tests/test_api.py` — FastAPI routes: `TestHealth`, `TestUploadJob`, `TestListJobs`, `TestGetJob`, `TestDeleteJob`, `TestGetResult`, `TestSearch`, `TestAsk`
+- `tests/test_api.py` — FastAPI routes: `TestHealth`, `TestUploadJob`, `TestListJobs`, `TestGetJob`, `TestDeleteJob`, `TestDeleteAllJobs`, `TestGetResult`, `TestSearch`, `TestAsk`
 - `tests/data/pdf/single_page.pdf` — single-page PDF fixture
 - `tests/data/pdf/multi_page.pdf` — multi-page PDF fixture (3 pages)
 - `tests/data/images/red.png` — PNG image fixture

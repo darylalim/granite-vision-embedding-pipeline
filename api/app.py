@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 
 from api.database import (
     create_job,
+    delete_all_jobs,
     delete_job,
     get_connection,
     get_job,
@@ -19,6 +20,7 @@ from api.database import (
 from api.models import (
     AskRequest,
     AskResponse,
+    DeleteAllResponse,
     HealthResponse,
     JobCreateResponse,
     JobResponse,
@@ -114,6 +116,25 @@ def create_app() -> FastAPI:
             raise
 
         return JobCreateResponse(job_id=job_id, status="pending")
+
+    @app.delete("/jobs", response_model=DeleteAllResponse)
+    async def delete_all():
+        db = app.state.db
+        jobs = list_jobs(db)
+        worker = app.state.worker
+
+        for job in jobs:
+            if job["status"] == "processing":
+                continue
+            for path_key in ("file_path", "result_path", "tensor_path"):
+                path_str = job.get(path_key)
+                if path_str:
+                    Path(path_str).unlink(missing_ok=True)
+            if worker:
+                worker.evict_cache(job["id"])
+
+        deleted = delete_all_jobs(db)
+        return DeleteAllResponse(deleted=deleted)
 
     @app.get("/jobs", response_model=list[JobResponse])
     async def list_all_jobs(status: str | None = None):

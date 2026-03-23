@@ -43,6 +43,10 @@ class HealthResponse(BaseModel):
     worker_running: bool
 
 
+class DeleteAllResponse(BaseModel):
+    deleted: int
+
+
 class AskRequest(BaseModel):
     query: str
     top_k: int = Field(default=3, ge=1, le=10)

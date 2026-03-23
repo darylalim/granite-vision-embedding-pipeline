@@ -12,7 +12,7 @@ Streamlit + FastAPI app for generating vector embeddings from PDF documents and 
 - RAG answer generation via external OpenAI-compatible VLM (OpenAI, Ollama, vLLM, etc.)
 - Per-document and combined JSON embedding downloads
 - Automatic device selection (MPS > CUDA > CPU)
-- Job dashboard with status tracking, filtering, and deletion
+- Job dashboard with status tracking, filtering, bulk delete, and per-job deletion
 
 ## Setup
 
