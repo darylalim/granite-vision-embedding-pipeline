@@ -9,8 +9,22 @@ from core.constants import DPI_OPTIONS, IMAGE_EXTENSIONS, MODEL_ID
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
 
+@st.cache_resource
 def api_client() -> httpx.Client:
     return httpx.Client(base_url=API_URL, timeout=120.0)
+
+
+def document_filter(completed: list[dict], key_prefix: str = "") -> str | None:
+    """Render a document filter selectbox and return the selected file ID."""
+    options = ["All documents"] + [j["file_stem"] for j in completed]
+    ids: list[str | None] = [None] + [j["id"] for j in completed]
+    idx = st.selectbox(
+        "Document filter",
+        range(len(options)),
+        format_func=lambda i: options[i],
+        key=f"{key_prefix}filter",
+    )
+    return ids[idx]
 
 
 st.set_page_config(page_title="Granite Vision Embedding Pipeline", layout="centered")
@@ -35,22 +49,22 @@ if uploaded_files:
     if st.button("Submit Jobs", type="primary"):
         job_ids: list[str] = []
         submit_errors: list[str] = []
-        with api_client() as client:
-            for f in uploaded_files:
-                try:
-                    resp = client.post(
-                        "/jobs",
-                        files={"file": (f.name, f.getvalue())},
-                        data={"dpi": str(dpi)},
+        client = api_client()
+        for f in uploaded_files:
+            try:
+                resp = client.post(
+                    "/jobs",
+                    files={"file": (f.name, f.getvalue())},
+                    data={"dpi": str(dpi)},
+                )
+                if resp.status_code == 201:
+                    job_ids.append(resp.json()["job_id"])
+                else:
+                    submit_errors.append(
+                        f"{f.name}: {resp.json().get('detail', 'Unknown error')}"
                     )
-                    if resp.status_code == 201:
-                        job_ids.append(resp.json()["job_id"])
-                    else:
-                        submit_errors.append(
-                            f"{f.name}: {resp.json().get('detail', 'Unknown error')}"
-                        )
-                except httpx.HTTPError as e:
-                    submit_errors.append(f"{f.name}: {e}")
+            except httpx.HTTPError as e:
+                submit_errors.append(f"{f.name}: {e}")
 
         for err in submit_errors:
             st.error(err)
@@ -63,34 +77,31 @@ if uploaded_files:
                 progress_text = st.empty()
                 polls = 0
                 timed_out = False
-                with api_client() as client:
-                    while True:
-                        completed = 0
-                        failed = 0
-                        for jid in job_ids:
-                            try:
-                                resp = client.get(f"/jobs/{jid}")
-                                if resp.status_code == 200:
-                                    s = resp.json()["status"]
-                                    if s == "completed":
-                                        completed += 1
-                                    elif s == "failed":
-                                        failed += 1
-                            except httpx.HTTPError:
-                                pass
-                        done = completed + failed
-                        progress_bar.progress(done / total)
-                        if failed:
-                            progress_text.text(f"{done}/{total} done — {failed} failed")
-                        else:
-                            progress_text.text(f"{done}/{total} completed")
-                        if done >= total:
-                            break
-                        polls += 1
-                        if polls >= max_polls:
-                            timed_out = True
-                            break
-                        time.sleep(2)
+                client = api_client()
+                while True:
+                    try:
+                        resp = client.get("/jobs")
+                        all_jobs = resp.json() if resp.status_code == 200 else []
+                    except httpx.HTTPError:
+                        all_jobs = []
+                    statuses = {j["id"]: j["status"] for j in all_jobs}
+                    completed = sum(
+                        1 for jid in job_ids if statuses.get(jid) == "completed"
+                    )
+                    failed = sum(1 for jid in job_ids if statuses.get(jid) == "failed")
+                    done = completed + failed
+                    progress_bar.progress(done / total)
+                    if failed:
+                        progress_text.text(f"{done}/{total} done — {failed} failed")
+                    else:
+                        progress_text.text(f"{done}/{total} completed")
+                    if done >= total:
+                        break
+                    polls += 1
+                    if polls >= max_polls:
+                        timed_out = True
+                        break
+                    time.sleep(2)
 
                 if timed_out:
                     status.update(
@@ -118,9 +129,9 @@ def confirm_delete_all():
     col_yes, col_no = st.columns(2)
     if col_yes.button("Delete", type="primary", key="confirm_delete"):
         try:
-            with api_client() as client:
-                resp = client.delete("/jobs")
-                count = resp.json().get("deleted", 0)
+            client = api_client()
+            resp = client.delete("/jobs")
+            count = resp.json().get("deleted", 0)
             st.session_state.pop("search_results", None)
             st.session_state.pop("ask_result", None)
             st.toast(f"Deleted {count} job(s).")
@@ -140,10 +151,10 @@ status_filter = col_filter.selectbox(
 )
 
 try:
-    with api_client() as client:
-        params = {} if status_filter == "all" else {"status": status_filter}
-        resp = client.get("/jobs", params=params)
-        jobs = resp.json() if resp.status_code == 200 else []
+    client = api_client()
+    params = {} if status_filter == "all" else {"status": status_filter}
+    resp = client.get("/jobs", params=params)
+    jobs = resp.json() if resp.status_code == 200 else []
 except httpx.HTTPError:
     jobs = []
     st.warning("Cannot connect to API server.")
@@ -163,14 +174,7 @@ if jobs:
         col3.metric("Documents", len(completed))
 
     for job in jobs:
-        status_emoji = {
-            "pending": "Pending",
-            "processing": "Processing",
-            "completed": "Completed",
-            "failed": "Failed",
-        }.get(job["status"], job["status"])
-
-        with st.expander(f"{job['file_stem']} — {status_emoji}"):
+        with st.expander(f"{job['file_stem']} — {job['status'].capitalize()}"):
             st.caption(
                 f"Status: {job['status']} · Type: {job['file_type']} · DPI: {job['dpi']}"
             )
@@ -184,24 +188,24 @@ if jobs:
 
             if job["status"] == "completed":
                 try:
-                    with api_client() as client:
-                        result_resp = client.get(f"/jobs/{job['id']}/result")
-                        if result_resp.status_code == 200:
-                            col_dl.download_button(
-                                f"Download {job['file_stem']} JSON",
-                                data=result_resp.content,
-                                file_name=f"{job['file_stem']}_embedding.json",
-                                mime="application/json",
-                                key=f"dl_{job['id']}",
-                            )
+                    client = api_client()
+                    result_resp = client.get(f"/jobs/{job['id']}/result")
+                    if result_resp.status_code == 200:
+                        col_dl.download_button(
+                            f"Download {job['file_stem']} JSON",
+                            data=result_resp.content,
+                            file_name=f"{job['file_stem']}_embedding.json",
+                            mime="application/json",
+                            key=f"dl_{job['id']}",
+                        )
                 except httpx.HTTPError:
                     pass
 
             if job["status"] != "processing":
                 if col_del.button("Delete", key=f"del_{job['id']}"):
                     try:
-                        with api_client() as client:
-                            client.delete(f"/jobs/{job['id']}")
+                        client = api_client()
+                        client.delete(f"/jobs/{job['id']}")
                         st.session_state.pop("search_results", None)
                         st.session_state.pop("ask_result", None)
                         st.rerun()
@@ -211,21 +215,21 @@ if jobs:
     # Download All
     if len(completed) > 1:
         try:
-            with api_client() as client:
-                all_results = []
-                for j in completed:
-                    result_resp = client.get(f"/jobs/{j['id']}/result")
-                    if result_resp.status_code == 200:
-                        all_results.append(result_resp.text)
-                if all_results:
-                    all_json = "[" + ",".join(all_results) + "]"
-                    st.download_button(
-                        "Download All JSON",
-                        data=all_json,
-                        file_name="all_embeddings.json",
-                        mime="application/json",
-                        key="download_all",
-                    )
+            client = api_client()
+            all_results = []
+            for j in completed:
+                result_resp = client.get(f"/jobs/{j['id']}/result")
+                if result_resp.status_code == 200:
+                    all_results.append(result_resp.text)
+            if all_results:
+                all_json = "[" + ",".join(all_results) + "]"
+                st.download_button(
+                    "Download All JSON",
+                    data=all_json,
+                    file_name="all_embeddings.json",
+                    mime="application/json",
+                    key="download_all",
+                )
         except httpx.HTTPError:
             pass
 
@@ -236,13 +240,7 @@ if jobs:
     # Search
     if completed:
         st.subheader("Search")
-        filter_options = ["All documents"] + [j["file_stem"] for j in completed]
-        filter_ids: list[str | None] = [None] + [j["id"] for j in completed]
-        filter_idx = st.selectbox(
-            "Document filter",
-            range(len(filter_options)),
-            format_func=lambda i: filter_options[i],
-        )
+        filter_file_id = document_filter(completed, key_prefix="search_")
 
         col_topk, col_minscore = st.columns(2)
         top_k = col_topk.number_input("Top K", min_value=1, max_value=100, value=5)
@@ -256,22 +254,20 @@ if jobs:
                 st.warning("Enter a search query.")
             else:
                 try:
-                    with api_client() as client:
-                        search_resp = client.post(
-                            "/search",
-                            json={
-                                "query": query,
-                                "top_k": top_k,
-                                "min_score": min_score,
-                                "filter_file_id": filter_ids[filter_idx],
-                            },
-                        )
-                        if search_resp.status_code == 200:
-                            st.session_state.search_results = search_resp.json()[
-                                "results"
-                            ]
-                        else:
-                            st.error(search_resp.json().get("detail", "Search failed"))
+                    client = api_client()
+                    search_resp = client.post(
+                        "/search",
+                        json={
+                            "query": query,
+                            "top_k": top_k,
+                            "min_score": min_score,
+                            "filter_file_id": filter_file_id,
+                        },
+                    )
+                    if search_resp.status_code == 200:
+                        st.session_state.search_results = search_resp.json()["results"]
+                    else:
+                        st.error(search_resp.json().get("detail", "Search failed"))
                 except httpx.HTTPError as e:
                     st.error(str(e))
 
@@ -289,14 +285,7 @@ if jobs:
 
         # Ask
         st.subheader("Ask")
-        ask_filter_options = ["All documents"] + [j["file_stem"] for j in completed]
-        ask_filter_ids: list[str | None] = [None] + [j["id"] for j in completed]
-        ask_filter_idx = st.selectbox(
-            "Document filter",
-            range(len(ask_filter_options)),
-            format_func=lambda i: ask_filter_options[i],
-            key="ask_filter",
-        )
+        ask_filter_file_id = document_filter(completed, key_prefix="ask_")
 
         ask_col_topk, ask_col_minscore = st.columns(2)
         ask_top_k = ask_col_topk.number_input(
@@ -312,25 +301,25 @@ if jobs:
                 st.warning("Enter a question.")
             else:
                 try:
-                    with api_client() as client:
-                        ask_resp = client.post(
-                            "/ask",
-                            json={
-                                "query": ask_query,
-                                "top_k": ask_top_k,
-                                "min_score": ask_min_score,
-                                "filter_file_id": ask_filter_ids[ask_filter_idx],
-                            },
+                    client = api_client()
+                    ask_resp = client.post(
+                        "/ask",
+                        json={
+                            "query": ask_query,
+                            "top_k": ask_top_k,
+                            "min_score": ask_min_score,
+                            "filter_file_id": ask_filter_file_id,
+                        },
+                    )
+                    if ask_resp.status_code == 200:
+                        st.session_state.ask_result = ask_resp.json()
+                    elif ask_resp.status_code == 503:
+                        st.warning(
+                            "Answer generation is not configured. "
+                            "Set GENERATION_API_URL and GENERATION_MODEL to enable."
                         )
-                        if ask_resp.status_code == 200:
-                            st.session_state.ask_result = ask_resp.json()
-                        elif ask_resp.status_code == 503:
-                            st.warning(
-                                "Answer generation is not configured. "
-                                "Set GENERATION_API_URL and GENERATION_MODEL to enable."
-                            )
-                        else:
-                            st.error(ask_resp.json().get("detail", "Ask failed"))
+                    else:
+                        st.error(ask_resp.json().get("detail", "Ask failed"))
                 except httpx.HTTPError as e:
                     st.error(str(e))
 
@@ -351,10 +340,10 @@ elif not uploaded_files:
 
 # Footer
 try:
-    with api_client() as client:
-        health = client.get("/health").json()
-        device = health.get("device", "unknown").upper()
-        queue_depth = health.get("queue_depth", 0)
-        st.caption(f"Device: {device} · Queue: {queue_depth}")
+    client = api_client()
+    health = client.get("/health").json()
+    device = health.get("device", "unknown").upper()
+    queue_depth = health.get("queue_depth", 0)
+    st.caption(f"Device: {device} · Queue: {queue_depth}")
 except httpx.HTTPError:
     st.caption("API server not connected")
