@@ -168,6 +168,7 @@ class EmbeddingWorker:
 
             page_embeddings = embed(pages, self._model, self._processor)
             total_duration = time.perf_counter_ns() - total_start
+            page_embeddings = page_embeddings.cpu()
 
             # Save results
             result_path = self._results_dir / f"{job_id}.json"

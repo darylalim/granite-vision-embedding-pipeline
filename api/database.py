@@ -35,6 +35,9 @@ def init_db(conn: sqlite3.Connection) -> None:
             error         TEXT
         )
     """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at)"
+    )
     conn.commit()
 
 
