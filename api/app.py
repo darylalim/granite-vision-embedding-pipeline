@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sqlite3
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -41,6 +42,41 @@ from core.rendering import render_page
 
 VALID_DPI = set(DPI_OPTIONS.values())
 VALID_EXTENSIONS = IMAGE_EXTENSIONS | {"pdf"}
+
+
+def _cleanup_job_files(job: dict, worker: EmbeddingWorker | None = None) -> None:
+    """Delete a job's associated files and evict from tensor cache."""
+    for key in ("file_path", "result_path", "tensor_path"):
+        if path_str := job.get(key):
+            Path(path_str).unlink(missing_ok=True)
+    if worker:
+        worker.evict_cache(job["id"])
+
+
+async def _run_search(
+    db: sqlite3.Connection,
+    worker: EmbeddingWorker,
+    req: SearchRequest | AskRequest,
+) -> list[tuple[str, int, float]]:
+    """Validate and execute a search across completed jobs."""
+    completed_jobs = list_jobs(db, status="completed")
+    job_ids = [j["id"] for j in completed_jobs]
+    if not job_ids:
+        return []
+    if req.filter_file_id and req.filter_file_id not in job_ids:
+        raise HTTPException(
+            400,
+            detail=f"filter_file_id '{req.filter_file_id}' is not a completed job",
+        )
+    params = {
+        "query": req.query,
+        "top_k": req.top_k,
+        "min_score": req.min_score,
+        "filter_file_id": req.filter_file_id,
+        "job_ids": job_ids,
+    }
+    future = worker.enqueue_search(params)
+    return await asyncio.wrap_future(future)
 
 
 def create_app() -> FastAPI:
@@ -120,19 +156,10 @@ def create_app() -> FastAPI:
     @app.delete("/jobs", response_model=DeleteAllResponse)
     async def delete_all():
         db = app.state.db
-        jobs = list_jobs(db)
         worker = app.state.worker
-
-        for job in jobs:
-            if job["status"] == "processing":
-                continue
-            for path_key in ("file_path", "result_path", "tensor_path"):
-                path_str = job.get(path_key)
-                if path_str:
-                    Path(path_str).unlink(missing_ok=True)
-            if worker:
-                worker.evict_cache(job["id"])
-
+        for job in list_jobs(db):
+            if job["status"] != "processing":
+                _cleanup_job_files(job, worker)
         deleted = delete_all_jobs(db)
         return DeleteAllResponse(deleted=deleted)
 
@@ -163,15 +190,7 @@ def create_app() -> FastAPI:
             raise HTTPException(404, detail="Job not found")
         if job["status"] == "processing":
             raise HTTPException(409, detail="Cannot delete a processing job")
-
-        for path_key in ("file_path", "result_path", "tensor_path"):
-            path_str = job.get(path_key)
-            if path_str:
-                Path(path_str).unlink(missing_ok=True)
-
-        worker = app.state.worker
-        if worker:
-            worker.evict_cache(job_id)
+        _cleanup_job_files(job, app.state.worker)
         delete_job(db, job_id)
 
     @app.get("/jobs/{job_id}/result")
@@ -190,29 +209,7 @@ def create_app() -> FastAPI:
         worker = app.state.worker
         if not worker:
             raise HTTPException(503, detail="Worker not running")
-
-        db = app.state.db
-        completed_jobs = list_jobs(db, status="completed")
-        job_ids = [j["id"] for j in completed_jobs]
-
-        if not job_ids:
-            return SearchResponse(results=[])
-
-        if req.filter_file_id and req.filter_file_id not in job_ids:
-            raise HTTPException(
-                400,
-                detail=f"filter_file_id '{req.filter_file_id}' is not a completed job",
-            )
-
-        params = {
-            "query": req.query,
-            "top_k": req.top_k,
-            "min_score": req.min_score,
-            "filter_file_id": req.filter_file_id,
-            "job_ids": job_ids,
-        }
-        future = worker.enqueue_search(params)
-        results = await asyncio.wrap_future(future)
+        results = await _run_search(app.state.db, worker, req)
         return SearchResponse(
             results=[
                 SearchResult(file_id=fid, page_index=pidx, score=score)
@@ -235,42 +232,27 @@ def create_app() -> FastAPI:
         if not worker:
             raise HTTPException(503, detail="Worker not running")
 
-        # Retrieval (reuse search pipeline)
         db = app.state.db
-        completed_jobs = list_jobs(db, status="completed")
-        job_ids = [j["id"] for j in completed_jobs]
-
-        if not job_ids:
-            return AskResponse(
-                answer="No documents have been processed yet.", sources=[]
-            )
-
-        if req.filter_file_id and req.filter_file_id not in job_ids:
-            raise HTTPException(
-                400,
-                detail=f"filter_file_id '{req.filter_file_id}' is not a completed job",
-            )
-
-        params = {
-            "query": req.query,
-            "top_k": req.top_k,
-            "min_score": req.min_score,
-            "filter_file_id": req.filter_file_id,
-            "job_ids": job_ids,
-        }
-        future = worker.enqueue_search(params)
-        search_results = await asyncio.wrap_future(future)
+        search_results = await _run_search(db, worker, req)
 
         if not search_results:
+            if not list_jobs(db, status="completed"):
+                return AskResponse(
+                    answer="No documents have been processed yet.", sources=[]
+                )
             return AskResponse(
                 answer="No relevant pages found for your query.", sources=[]
             )
 
-        # Re-render matched pages
+        # Re-render matched pages, caching PDF reads per document
         images = []
         sources = []
+        job_cache: dict[str, dict | None] = {}
+        pdf_cache: dict[str, bytes] = {}
         for file_id, page_index, score in search_results:
-            job = get_job(db, file_id)
+            if file_id not in job_cache:
+                job_cache[file_id] = get_job(db, file_id)
+            job = job_cache[file_id]
             if not job:
                 continue
             file_path = Path(job["file_path"])
@@ -280,8 +262,9 @@ def create_app() -> FastAPI:
                 if job["file_type"] == "image":
                     image = load_image(file_path)
                 else:
-                    pdf_data = file_path.read_bytes()
-                    image = render_page(pdf_data, page_index, dpi=job["dpi"])
+                    if file_id not in pdf_cache:
+                        pdf_cache[file_id] = file_path.read_bytes()
+                    image = render_page(pdf_cache[file_id], page_index, dpi=job["dpi"])
                 images.append(image)
                 sources.append(
                     SearchResult(file_id=file_id, page_index=page_index, score=score)
