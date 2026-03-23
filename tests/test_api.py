@@ -58,6 +58,55 @@ def api(tmp_path: Path) -> Generator[ApiFixture]:
             yield ApiFixture(client=tc, mock_worker=mock_worker)
 
 
+class TestCleanupJobFiles:
+    def test_deletes_associated_files(self, tmp_path: Path) -> None:
+        from api.app import _cleanup_job_files
+
+        file_path = tmp_path / "upload.pdf"
+        result_path = tmp_path / "result.json"
+        tensor_path = tmp_path / "tensor.pt"
+        file_path.write_text("data")
+        result_path.write_text("{}")
+        tensor_path.write_bytes(b"tensor")
+
+        job = {
+            "id": "job1",
+            "file_path": str(file_path),
+            "result_path": str(result_path),
+            "tensor_path": str(tensor_path),
+        }
+        _cleanup_job_files(job)
+
+        assert not file_path.exists()
+        assert not result_path.exists()
+        assert not tensor_path.exists()
+
+    def test_evicts_cache_when_worker_provided(self) -> None:
+        from api.app import _cleanup_job_files
+
+        mock_worker = MagicMock()
+        job = {"id": "job1"}
+        _cleanup_job_files(job, worker=mock_worker)
+        mock_worker.evict_cache.assert_called_once_with("job1")
+
+    def test_skips_without_worker(self) -> None:
+        from api.app import _cleanup_job_files
+
+        job = {"id": "job1"}
+        _cleanup_job_files(job)  # Should not raise
+
+    def test_handles_missing_files(self, tmp_path: Path) -> None:
+        from api.app import _cleanup_job_files
+
+        job = {
+            "id": "job1",
+            "file_path": str(tmp_path / "nonexistent.pdf"),
+            "result_path": str(tmp_path / "nonexistent.json"),
+            "tensor_path": str(tmp_path / "nonexistent.pt"),
+        }
+        _cleanup_job_files(job)  # Should not raise (missing_ok=True)
+
+
 class TestHealth:
     def test_returns_health(self, api: ApiFixture) -> None:
         resp = api.client.get("/health")
@@ -451,6 +500,20 @@ class TestAsk:
         with patch.dict("os.environ", env, clear=True):
             resp = api.client.post("/ask", json={"query": "test"})
         assert resp.status_code == 503
+
+    def test_returns_message_when_no_completed_jobs(self, api: ApiFixture) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "GENERATION_API_URL": "http://fake-vlm:8000/v1",
+                "GENERATION_MODEL": "test-model",
+            },
+        ):
+            resp = api.client.post("/ask", json={"query": "test"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["sources"] == []
+        assert "No documents have been processed" in data["answer"]
 
     def test_returns_answer_with_sources(self, api: ApiFixture) -> None:
         from concurrent.futures import Future
