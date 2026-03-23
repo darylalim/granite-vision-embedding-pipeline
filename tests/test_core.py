@@ -15,32 +15,10 @@ from core.constants import (
 from core.embedding import embed, get_device, load_image, load_model
 from core.rendering import render_page, render_pages
 from core.search import filter_results, search_multi
+from tests.factories import make_image_processor, make_mock_model, make_query_processor
 
 PDF_DATA_DIR = Path(__file__).parent / "data" / "pdf"
 IMAGE_DATA_DIR = Path(__file__).parent / "data" / "images"
-
-
-def _make_mock_model(return_value: torch.Tensor) -> MagicMock:
-    model = MagicMock()
-    model.device = "cpu"
-    model.return_value = return_value
-    return model
-
-
-def _make_image_processor() -> MagicMock:
-    mock_val = MagicMock(spec=torch.Tensor)
-    mock_val.to.return_value = mock_val
-    processor = MagicMock()
-    processor.process_images.return_value = {"pixel_values": mock_val}
-    return processor
-
-
-def _make_query_processor() -> MagicMock:
-    mock_val = MagicMock(spec=torch.Tensor)
-    mock_val.to.return_value = mock_val
-    processor = MagicMock()
-    processor.process_queries.return_value = {"input_ids": mock_val}
-    return processor
 
 
 class TestDpiOptions:
@@ -87,8 +65,8 @@ class TestLoadImage:
         assert img.size == (64, 64)
 
     def test_embed_accepts_image_fixture(self) -> None:
-        mock_processor = _make_image_processor()
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_image_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
 
         img = load_image(IMAGE_DATA_DIR / "red.png")
         result = embed([img], mock_model, mock_processor)
@@ -257,10 +235,8 @@ class TestEmbed:
         num_patches = 4
         embedding_dim = 128
 
-        mock_processor = _make_image_processor()
-        mock_model = _make_mock_model(
-            torch.randn(num_pages, num_patches, embedding_dim)
-        )
+        mock_processor = make_image_processor()
+        mock_model = make_mock_model(torch.randn(num_pages, num_patches, embedding_dim))
 
         images = [Image.new("RGB", (64, 64)) for _ in range(num_pages)]
         embeddings = embed(images, mock_model, mock_processor)
@@ -269,8 +245,8 @@ class TestEmbed:
         assert embeddings.shape == (num_pages, num_patches, embedding_dim)
 
     def test_calls_process_images(self) -> None:
-        mock_processor = _make_image_processor()
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_image_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
 
         images = [Image.new("RGB", (64, 64))]
         embed(images, mock_model, mock_processor)
@@ -335,8 +311,8 @@ class TestFilterResults:
 
 class TestSearchMulti:
     def test_returns_cross_document_ranked_results(self) -> None:
-        mock_processor = _make_query_processor()
-        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
+        mock_processor = make_query_processor()
+        mock_model = make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
 
         # Doc A: 2 pages scoring [0.3, 0.8], Doc B: 1 page scoring [0.6]
         mock_processor.score.side_effect = [
@@ -357,8 +333,8 @@ class TestSearchMulti:
         assert ranked[2] == ("id_a", 0, approx(0.3))
 
     def test_filters_to_single_document(self) -> None:
-        mock_processor = _make_query_processor()
-        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
+        mock_processor = make_query_processor()
+        mock_model = make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
         mock_processor.score.return_value = torch.tensor([[0.5]])
 
         embeddings: dict[str, torch.Tensor] = {
@@ -375,8 +351,8 @@ class TestSearchMulti:
         assert mock_processor.score.call_count == 1
 
     def test_encodes_query_once_for_multiple_docs(self) -> None:
-        mock_processor = _make_query_processor()
-        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
+        mock_processor = make_query_processor()
+        mock_model = make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
         mock_processor.score.side_effect = [
             torch.tensor([[0.3]]),
             torch.tensor([[0.6]]),
@@ -393,16 +369,16 @@ class TestSearchMulti:
         assert mock_model.call_count == 1
 
     def test_returns_empty_for_empty_embeddings(self) -> None:
-        mock_processor = _make_query_processor()
-        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
+        mock_processor = make_query_processor()
+        mock_model = make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
 
         result = search_multi("test query", mock_model, mock_processor, {})
 
         assert result == []
 
     def test_returns_empty_for_missing_filter_file_id(self) -> None:
-        mock_processor = _make_query_processor()
-        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
+        mock_processor = make_query_processor()
+        mock_model = make_mock_model(torch.tensor([[0.1, 0.2, 0.3]]))
 
         embeddings: dict[str, torch.Tensor] = {
             "id_a": torch.randn(1, 4, 128),

@@ -2,46 +2,14 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 import torch
 
-from api.database import create_job, get_connection, get_job, init_db, update_job
+from api.database import create_job, get_job, update_job
 from api.worker import EmbeddingWorker
+from tests.factories import make_mock_model, make_mock_processor
 
 PDF_DATA_DIR = Path(__file__).parent / "data" / "pdf"
 IMAGE_DATA_DIR = Path(__file__).parent / "data" / "images"
-
-
-def _make_mock_model(return_value: torch.Tensor) -> MagicMock:
-    model = MagicMock()
-    model.device = "cpu"
-    model.return_value = return_value
-    return model
-
-
-def _make_mock_processor() -> MagicMock:
-    mock_val = MagicMock(spec=torch.Tensor)
-    mock_val.to.return_value = mock_val
-    processor = MagicMock()
-    processor.process_images.return_value = {"pixel_values": mock_val}
-    processor.process_queries.return_value = {"input_ids": mock_val}
-    return processor
-
-
-@pytest.fixture
-def db(tmp_path: Path) -> sqlite3.Connection:
-    conn = get_connection(tmp_path / "test.db")
-    init_db(conn)
-    return conn
-
-
-@pytest.fixture
-def dirs(tmp_path: Path) -> tuple[Path, Path]:
-    uploads = tmp_path / "uploads"
-    results = tmp_path / "results"
-    uploads.mkdir()
-    results.mkdir()
-    return uploads, results
 
 
 class TestProcessJob:
@@ -50,8 +18,8 @@ class TestProcessJob:
         self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
     ) -> None:
         uploads, results = dirs
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
-        mock_processor = _make_mock_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_mock_processor()
         mock_load.return_value = (mock_model, mock_processor)
 
         # Copy PDF fixture to uploads
@@ -83,8 +51,8 @@ class TestProcessJob:
         self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
     ) -> None:
         uploads, results = dirs
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
-        mock_processor = _make_mock_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_mock_processor()
         mock_load.return_value = (mock_model, mock_processor)
 
         # Copy image fixture to uploads
@@ -113,8 +81,8 @@ class TestProcessJob:
         self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
     ) -> None:
         uploads, results = dirs
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
-        mock_processor = _make_mock_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_mock_processor()
         mock_load.return_value = (mock_model, mock_processor)
 
         upload_path = uploads / "empty.pdf"
@@ -144,8 +112,8 @@ class TestProcessJob:
         import json
 
         uploads, results = dirs
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
-        mock_processor = _make_mock_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_mock_processor()
         mock_load.return_value = (mock_model, mock_processor)
 
         pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
@@ -182,8 +150,8 @@ class TestProcessJob:
         self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
     ) -> None:
         uploads, results = dirs
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
-        mock_processor = _make_mock_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_mock_processor()
         mock_load.return_value = (mock_model, mock_processor)
 
         upload_path = uploads / "bad.png"
@@ -205,6 +173,35 @@ class TestProcessJob:
         assert job["status"] == "failed"
         assert job["error"] is not None
 
+    @patch("api.worker.load_model")
+    def test_saves_tensor_on_cpu(
+        self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
+    ) -> None:
+        uploads, results = dirs
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_mock_processor()
+        mock_load.return_value = (mock_model, mock_processor)
+
+        pdf_data = (PDF_DATA_DIR / "single_page.pdf").read_bytes()
+        upload_path = uploads / "test.pdf"
+        upload_path.write_bytes(pdf_data)
+
+        job_id = create_job(
+            db,
+            file_name="test.pdf",
+            file_stem="test",
+            file_path=str(upload_path),
+            file_type="pdf",
+            dpi=150,
+        )
+
+        worker = EmbeddingWorker(db, uploads_dir=uploads, results_dir=results)
+        worker.process_job(get_job(db, job_id))
+
+        job = get_job(db, job_id)
+        tensor = torch.load(Path(job["tensor_path"]), weights_only=True)
+        assert tensor.device == torch.device("cpu")
+
 
 class TestStartupRecovery:
     @patch("api.worker.load_model")
@@ -212,8 +209,8 @@ class TestStartupRecovery:
         self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
     ) -> None:
         uploads, results = dirs
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
-        mock_processor = _make_mock_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_mock_processor()
         mock_load.return_value = (mock_model, mock_processor)
 
         job_id = create_job(
@@ -239,8 +236,8 @@ class TestTensorCache:
         self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
     ) -> None:
         uploads, results = dirs
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
-        mock_processor = _make_mock_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_mock_processor()
         mock_load.return_value = (mock_model, mock_processor)
 
         worker = EmbeddingWorker(
@@ -262,8 +259,8 @@ class TestTensorCache:
         self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
     ) -> None:
         uploads, results = dirs
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
-        mock_processor = _make_mock_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_mock_processor()
         mock_load.return_value = (mock_model, mock_processor)
 
         worker = EmbeddingWorker(db, uploads_dir=uploads, results_dir=results)
@@ -276,8 +273,8 @@ class TestTensorCache:
         self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
     ) -> None:
         uploads, results = dirs
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
-        mock_processor = _make_mock_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_mock_processor()
         mock_load.return_value = (mock_model, mock_processor)
 
         # Create a completed job with a .pt file
@@ -316,8 +313,8 @@ class TestSearchDispatch:
         self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
     ) -> None:
         uploads, results = dirs
-        mock_model = _make_mock_model(torch.tensor([[0.1, 0.2]]))
-        mock_processor = _make_mock_processor()
+        mock_model = make_mock_model(torch.tensor([[0.1, 0.2]]))
+        mock_processor = make_mock_processor()
         mock_processor.score.return_value = torch.tensor([[0.8]])
         mock_load.return_value = (mock_model, mock_processor)
 
@@ -365,8 +362,8 @@ class TestSearchDispatch:
         self, mock_load: MagicMock, db: sqlite3.Connection, dirs: tuple[Path, Path]
     ) -> None:
         uploads, results = dirs
-        mock_model = _make_mock_model(torch.randn(1, 4, 128))
-        mock_processor = _make_mock_processor()
+        mock_model = make_mock_model(torch.randn(1, 4, 128))
+        mock_processor = make_mock_processor()
         mock_load.return_value = (mock_model, mock_processor)
 
         worker = EmbeddingWorker(db, uploads_dir=uploads, results_dir=results)

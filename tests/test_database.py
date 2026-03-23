@@ -1,13 +1,9 @@
 import sqlite3
-from pathlib import Path
-
-import pytest
 
 from api.database import (
     create_job,
     delete_all_jobs,
     delete_job,
-    get_connection,
     get_job,
     init_db,
     list_jobs,
@@ -15,13 +11,6 @@ from api.database import (
     reset_processing_jobs,
     update_job,
 )
-
-
-@pytest.fixture
-def db(tmp_path: Path) -> sqlite3.Connection:
-    conn = get_connection(tmp_path / "test.db")
-    init_db(conn)
-    return conn
 
 
 class TestInitDb:
@@ -34,6 +23,12 @@ class TestInitDb:
     def test_enables_wal_mode(self, db: sqlite3.Connection) -> None:
         cursor = db.execute("PRAGMA journal_mode")
         assert cursor.fetchone()[0] == "wal"
+
+    def test_creates_status_index(self, db: sqlite3.Connection) -> None:
+        cursor = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_jobs_status_created'"
+        )
+        assert cursor.fetchone() is not None
 
     def test_idempotent(self, db: sqlite3.Connection) -> None:
         init_db(db)
