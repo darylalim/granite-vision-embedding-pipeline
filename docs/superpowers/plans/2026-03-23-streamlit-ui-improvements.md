@@ -1,0 +1,707 @@
+# Streamlit UI Improvements Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Rewrite `streamlit_app.py` to implement 16 UI improvements: tabs layout, sidebar health, advanced options, descriptive labels, auto-refresh, dataframe jobs table, combined search/ask, spinners, toast feedback, connection banner, help tooltips, and persisted query state.
+
+**Architecture:** Single-file rewrite of `streamlit_app.py`. The app uses `st.tabs` for navigation (Upload, Jobs, Query), `st.sidebar` for persistent health info, and `@st.fragment` for auto-refreshing the job list. No changes to API, core, database, or tests.
+
+**Tech Stack:** Streamlit (tabs, fragment, dataframe, sidebar, toast, spinner, dialog), httpx, pandas (for dataframe)
+
+**Spec:** `docs/superpowers/specs/2026-03-23-streamlit-ui-improvements-design.md`
+
+---
+
+### Task 1: Scaffold — Page Config, Connection Check, Sidebar, Tabs
+
+**Files:**
+- Modify: `streamlit_app.py` (full rewrite — replace lines 1-350)
+
+This task replaces the entire file with the scaffolding: imports, helpers, page config, connection check with `st.stop()`, sidebar health, and three tab placeholders.
+
+- [ ] **Step 1: Write the scaffolding**
+
+Replace `streamlit_app.py` with:
+
+```python
+import os
+import time
+from datetime import timedelta
+
+import httpx
+import pandas as pd
+import streamlit as st
+
+from core.constants import DPI_OPTIONS, IMAGE_EXTENSIONS, MODEL_ID
+
+API_URL = os.environ.get("API_URL", "http://localhost:8000")
+
+STATUS_ICONS = {
+    "completed": "\U0001f7e2",  # green circle
+    "failed": "\U0001f534",     # red circle
+    "pending": "\U0001f7e1",    # yellow circle
+    "processing": "\U0001f535", # blue circle
+}
+
+
+@st.cache_resource
+def api_client() -> httpx.Client:
+    return httpx.Client(base_url=API_URL, timeout=120.0)
+
+
+def document_filter(completed: list[dict]) -> str | None:
+    """Render a document filter selectbox and return the selected file ID."""
+    options = ["All documents"] + [j["file_stem"] for j in completed]
+    ids: list[str | None] = [None] + [j["id"] for j in completed]
+    idx = st.selectbox(
+        "Document filter",
+        range(len(options)),
+        format_func=lambda i: options[i],
+    )
+    return ids[idx]
+
+
+# --- Page Config ---
+st.set_page_config(page_title="Granite Vision Embedding Pipeline", layout="wide")
+st.title("Granite Vision Embedding Pipeline")
+
+# --- Connection Check ---
+try:
+    _health = api_client().get("/health").json()
+except httpx.HTTPError:
+    st.error(
+        "Cannot connect to API server. "
+        "Start it with: `uv run uvicorn api.app:create_app --factory --port 8000`"
+    )
+    st.stop()
+
+# --- Sidebar ---
+st.sidebar.caption(f"**Model:** {MODEL_ID}")
+st.sidebar.caption(f"**Device:** {_health.get('device', 'unknown').upper()}")
+st.sidebar.caption(f"**Queue:** {_health.get('queue_depth', 0)} pending")
+
+# --- Tabs ---
+tab_upload, tab_jobs, tab_query = st.tabs(["Upload", "Jobs", "Query"])
+
+with tab_upload:
+    st.info("Upload tab — coming next.")
+
+with tab_jobs:
+    st.info("Jobs tab — coming soon.")
+
+with tab_query:
+    st.info("Query tab — coming soon.")
+```
+
+- [ ] **Step 2: Add pandas to dependencies**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv add pandas`
+
+This is needed for `st.dataframe` with a pandas DataFrame in the Jobs tab.
+
+- [ ] **Step 3: Verify the app runs**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run python -c "import streamlit_app" 2>&1 || true`
+
+This will fail (Streamlit scripts aren't importable normally) but confirms no syntax errors. Then verify manually if desired:
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run python -c "import ast; ast.parse(open('streamlit_app.py').read()); print('Syntax OK')"`
+
+Expected: `Syntax OK`
+
+- [ ] **Step 4: Lint and format**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run ruff check streamlit_app.py && uv run ruff format --check streamlit_app.py`
+
+Expected: No errors.
+
+- [ ] **Step 5: Run existing tests to verify no regressions**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run pytest -x -q`
+
+Expected: All tests pass. The tests don't import `streamlit_app`, so there should be no impact.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline"
+git add streamlit_app.py pyproject.toml uv.lock
+git commit -m "refactor: scaffold new Streamlit UI with tabs, sidebar, connection check"
+```
+
+---
+
+### Task 2: Upload Tab
+
+**Files:**
+- Modify: `streamlit_app.py` (replace the `with tab_upload:` placeholder block)
+
+Implements the full Upload tab: descriptive file uploader label, DPI in advanced options expander, file summary caption, disable-while-uploading submit button, polling loop, toast on success.
+
+- [ ] **Step 1: Replace the Upload tab placeholder**
+
+Replace the `with tab_upload:` block in `streamlit_app.py` with:
+
+```python
+with tab_upload:
+    uploaded_files = st.file_uploader(
+        "Drop PDFs or images here (PNG, JPG, WebP) — up to 50 MB each",
+        type=["pdf", *IMAGE_EXTENSIONS],
+        accept_multiple_files=True,
+    )
+
+    with st.expander("Advanced options"):
+        dpi_label = st.radio("Render DPI", DPI_OPTIONS, index=1, horizontal=True,
+                             help="Higher DPI = better quality but slower processing")
+    dpi = DPI_OPTIONS[dpi_label]
+
+    if uploaded_files:
+        total_size_mb = sum(len(f.getvalue()) for f in uploaded_files) / 1_048_576
+        st.caption(f"{len(uploaded_files)} file(s) \u00b7 {total_size_mb:.1f} MB")
+
+    uploading = st.session_state.get("uploading", False)
+
+    if uploaded_files and st.button("Submit Jobs", type="primary", disabled=uploading):
+        st.session_state["uploading"] = True
+        job_ids: list[str] = []
+        submit_errors: list[str] = []
+        client = api_client()
+        for f in uploaded_files:
+            try:
+                resp = client.post(
+                    "/jobs",
+                    files={"file": (f.name, f.getvalue())},
+                    data={"dpi": str(dpi)},
+                )
+                if resp.status_code == 201:
+                    job_ids.append(resp.json()["job_id"])
+                else:
+                    submit_errors.append(
+                        f"{f.name}: {resp.json().get('detail', 'Unknown error')}"
+                    )
+            except httpx.HTTPError as e:
+                submit_errors.append(f"{f.name}: {e}")
+
+        for err in submit_errors:
+            st.error(err)
+
+        if job_ids:
+            total = len(job_ids)
+            max_polls = 150
+            with st.status(f"Processing {total} job(s)...", expanded=True) as status:
+                progress_bar = st.progress(0)
+                progress_text = st.empty()
+                polls = 0
+                timed_out = False
+                while True:
+                    try:
+                        resp = client.get("/jobs")
+                        all_jobs = resp.json() if resp.status_code == 200 else []
+                    except httpx.HTTPError:
+                        all_jobs = []
+                    statuses = {j["id"]: j["status"] for j in all_jobs}
+                    n_completed = sum(
+                        1 for jid in job_ids if statuses.get(jid) == "completed"
+                    )
+                    n_failed = sum(
+                        1 for jid in job_ids if statuses.get(jid) == "failed"
+                    )
+                    done = n_completed + n_failed
+                    progress_bar.progress(done / total)
+                    if n_failed:
+                        progress_text.text(f"{done}/{total} done \u2014 {n_failed} failed")
+                    else:
+                        progress_text.text(f"{done}/{total} completed")
+                    if done >= total:
+                        break
+                    polls += 1
+                    if polls >= max_polls:
+                        timed_out = True
+                        break
+                    time.sleep(2)
+
+                if timed_out:
+                    status.update(
+                        label="Polling timed out \u2014 check Jobs tab", state="error"
+                    )
+                elif n_failed:
+                    status.update(label="Jobs finished with errors", state="error")
+                else:
+                    status.update(label="All jobs completed", state="complete")
+                    st.toast(f"Completed {total} job(s).")
+
+        st.session_state["uploading"] = False
+        st.rerun()
+```
+
+- [ ] **Step 2: Verify syntax**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run python -c "import ast; ast.parse(open('streamlit_app.py').read()); print('Syntax OK')"`
+
+Expected: `Syntax OK`
+
+- [ ] **Step 3: Lint and format**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run ruff check streamlit_app.py && uv run ruff format --check streamlit_app.py`
+
+Fix any issues if needed.
+
+- [ ] **Step 4: Run existing tests**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run pytest -x -q`
+
+Expected: All tests pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline"
+git add streamlit_app.py
+git commit -m "feat: implement Upload tab with descriptive label, DPI expander, toast"
+```
+
+---
+
+### Task 3: Jobs Tab — Fragment, Dataframe, Metrics, Delete All
+
+**Files:**
+- Modify: `streamlit_app.py` (replace the `with tab_jobs:` placeholder block)
+
+Implements the Jobs tab: status filter + Delete All outside the fragment, `@st.fragment(run_every=5)` wrapping data fetch + metrics + dataframe, status emoji badges, row selection persisted in session state, detail panel, individual delete with toast, Download All, and the existing Delete All dialog.
+
+- [ ] **Step 1: Add the confirm_delete_all dialog function**
+
+Add this function after the `document_filter` function (before the `# --- Page Config ---` comment):
+
+```python
+@st.dialog("Confirm Delete All")
+def confirm_delete_all():
+    st.write(
+        "This will delete all jobs and their files. "
+        "Jobs currently processing will be kept."
+    )
+    col_yes, col_no = st.columns(2)
+    if col_yes.button("Delete", type="primary", key="confirm_delete"):
+        try:
+            client = api_client()
+            resp = client.delete("/jobs")
+            count = resp.json().get("deleted", 0)
+            st.session_state.pop("search_results", None)
+            st.session_state.pop("ask_result", None)
+            st.session_state.pop("selected_job_id", None)
+            st.toast(f"Deleted {count} job(s).")
+            st.rerun()
+        except httpx.HTTPError as e:
+            st.error(str(e))
+    if col_no.button("Cancel", key="cancel_delete"):
+        st.rerun()
+```
+
+- [ ] **Step 2: Replace the Jobs tab placeholder**
+
+Replace the `with tab_jobs:` block with:
+
+```python
+with tab_jobs:
+    # --- Controls (outside fragment) ---
+    col_filter, col_delete_all = st.columns([3, 1])
+    status_filter = col_filter.selectbox(
+        "Status filter",
+        ["all", "pending", "processing", "completed", "failed"],
+    )
+    if col_delete_all.button("Delete All"):
+        confirm_delete_all()
+
+    # --- Auto-refreshing fragment ---
+    @st.fragment(run_every=timedelta(seconds=5))
+    def jobs_fragment():
+        client = api_client()
+
+        # Always fetch all jobs for metrics
+        try:
+            all_resp = client.get("/jobs")
+            all_jobs = all_resp.json() if all_resp.status_code == 200 else []
+        except httpx.HTTPError:
+            all_jobs = []
+
+        all_completed = [j for j in all_jobs if j["status"] == "completed"]
+
+        # Metrics (always based on all completed jobs)
+        if all_completed:
+            total_pages = sum(j.get("page_count") or 0 for j in all_completed)
+            total_duration_ns = sum(j.get("duration_ns") or 0 for j in all_completed)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Duration", f"{total_duration_ns / 1_000_000_000:.2f} s")
+            col2.metric("Pages", total_pages)
+            col3.metric("Documents", len(all_completed))
+
+        # Download All
+        if len(all_completed) > 1:
+            all_results = []
+            for j in all_completed:
+                try:
+                    result_resp = client.get(f"/jobs/{j['id']}/result")
+                    if result_resp.status_code == 200:
+                        all_results.append(result_resp.text)
+                except httpx.HTTPError:
+                    pass
+            if all_results:
+                all_json = "[" + ",".join(all_results) + "]"
+                st.download_button(
+                    "Download All JSON",
+                    data=all_json,
+                    file_name="all_embeddings.json",
+                    mime="application/json",
+                    key="download_all",
+                )
+
+        # Filtered job list for dataframe
+        if status_filter == "all":
+            filtered_jobs = all_jobs
+        else:
+            filtered_jobs = [j for j in all_jobs if j["status"] == status_filter]
+
+        if not filtered_jobs:
+            st.info("No jobs found.")
+            return
+
+        # Build dataframe
+        rows = []
+        for j in filtered_jobs:
+            icon = STATUS_ICONS.get(j["status"], "")
+            duration_s = (j.get("duration_ns") or 0) / 1_000_000_000
+            rows.append({
+                "Name": j["file_stem"],
+                "Status": f"{icon} {j['status'].capitalize()}",
+                "Type": j["file_type"],
+                "DPI": j["dpi"],
+                "Pages": j.get("page_count") or "",
+                "Duration": f"{duration_s:.2f} s" if duration_s > 0 else "",
+                "_id": j["id"],
+            })
+
+        df = pd.DataFrame(rows)
+        display_df = df.drop(columns=["_id"])
+
+        event = st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            selection_mode="single-row",
+            on_select="rerun",
+            key="jobs_table",
+        )
+
+        # Persist selection
+        selected_rows = event.selection.rows if event.selection else []
+        if selected_rows:
+            selected_idx = selected_rows[0]
+            st.session_state["selected_job_id"] = df.iloc[selected_idx]["_id"]
+        else:
+            st.session_state.pop("selected_job_id", None)
+
+    jobs_fragment()
+
+    # --- Detail Panel (outside fragment) ---
+    selected_job_id = st.session_state.get("selected_job_id")
+    if selected_job_id:
+        try:
+            client = api_client()
+            resp = client.get(f"/jobs/{selected_job_id}")
+            if resp.status_code == 200:
+                job = resp.json()
+                st.subheader(f"{job['file_stem']}")
+                st.caption(
+                    f"Status: {job['status']} \u00b7 Type: {job['file_type']} "
+                    f"\u00b7 DPI: {job['dpi']}"
+                )
+                if job.get("page_count"):
+                    duration_s = (job.get("duration_ns") or 0) / 1_000_000_000
+                    st.caption(
+                        f"Pages: {job['page_count']} \u00b7 Duration: {duration_s:.2f} s"
+                    )
+                if job.get("error"):
+                    st.error(job["error"])
+
+                col_dl, col_del = st.columns(2)
+
+                if job["status"] == "completed":
+                    try:
+                        result_resp = client.get(f"/jobs/{job['id']}/result")
+                        if result_resp.status_code == 200:
+                            col_dl.download_button(
+                                f"Download {job['file_stem']} JSON",
+                                data=result_resp.content,
+                                file_name=f"{job['file_stem']}_embedding.json",
+                                mime="application/json",
+                                key=f"dl_{job['id']}",
+                            )
+                    except httpx.HTTPError:
+                        pass
+
+                if job["status"] != "processing":
+                    if col_del.button("Delete", key=f"del_{job['id']}"):
+                        try:
+                            client.delete(f"/jobs/{job['id']}")
+                            st.session_state.pop("selected_job_id", None)
+                            st.session_state.pop("search_results", None)
+                            st.session_state.pop("ask_result", None)
+                            st.toast(f"Deleted {job['file_stem']}.")
+                            st.rerun()
+                        except httpx.HTTPError as e:
+                            st.error(str(e))
+            else:
+                # Job no longer exists
+                st.session_state.pop("selected_job_id", None)
+        except httpx.HTTPError:
+            st.session_state.pop("selected_job_id", None)
+```
+
+- [ ] **Step 3: Verify syntax**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run python -c "import ast; ast.parse(open('streamlit_app.py').read()); print('Syntax OK')"`
+
+Expected: `Syntax OK`
+
+- [ ] **Step 4: Lint and format**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run ruff check streamlit_app.py && uv run ruff format --check streamlit_app.py`
+
+Fix any issues if needed.
+
+- [ ] **Step 5: Run existing tests**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run pytest -x -q`
+
+Expected: All tests pass.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline"
+git add streamlit_app.py
+git commit -m "feat: implement Jobs tab with auto-refresh, dataframe, detail panel"
+```
+
+---
+
+### Task 4: Query Tab — Combined Search and Ask
+
+**Files:**
+- Modify: `streamlit_app.py` (replace the `with tab_query:` placeholder block)
+
+Implements the Query tab: no-completed-jobs guard, document filter, advanced options expander with help tooltips, shared query input persisted in session state, Search and Ask buttons side by side with spinners, structured search results, bordered ask results container.
+
+- [ ] **Step 1: Replace the Query tab placeholder**
+
+Replace the `with tab_query:` block with:
+
+```python
+with tab_query:
+    # Check for completed jobs
+    try:
+        client = api_client()
+        completed_resp = client.get("/jobs", params={"status": "completed"})
+        completed_jobs = (
+            completed_resp.json() if completed_resp.status_code == 200 else []
+        )
+    except httpx.HTTPError:
+        completed_jobs = []
+
+    if not completed_jobs:
+        st.info("No documents available \u2014 upload and process files first.")
+    else:
+        job_lookup = {j["id"]: j for j in completed_jobs}
+
+        filter_file_id = document_filter(completed_jobs)
+
+        with st.expander("Advanced options"):
+            col_topk, col_minscore = st.columns(2)
+            top_k = col_topk.number_input(
+                "Top K",
+                min_value=1,
+                max_value=100,
+                value=5,
+                help="Number of results to return",
+            )
+            min_score = col_minscore.number_input(
+                "Min score",
+                min_value=0.0,
+                value=0.0,
+                step=0.1,
+                help="Filter out low-confidence results",
+            )
+
+        query = st.text_input("Query", key="query_input")
+
+        col_search, col_ask = st.columns(2)
+        search_clicked = col_search.button("Search", type="primary")
+        ask_clicked = col_ask.button("Ask")
+
+        if search_clicked:
+            if not query:
+                st.warning("Enter a query.")
+            else:
+                with st.spinner("Searching..."):
+                    try:
+                        client = api_client()
+                        search_resp = client.post(
+                            "/search",
+                            json={
+                                "query": query,
+                                "top_k": top_k,
+                                "min_score": min_score,
+                                "filter_file_id": filter_file_id,
+                            },
+                        )
+                        if search_resp.status_code == 200:
+                            st.session_state["search_results"] = search_resp.json()[
+                                "results"
+                            ]
+                            st.session_state.pop("ask_result", None)
+                        else:
+                            st.error(
+                                search_resp.json().get("detail", "Search failed")
+                            )
+                    except httpx.HTTPError as e:
+                        st.error(str(e))
+
+        if ask_clicked:
+            if not query:
+                st.warning("Enter a question.")
+            else:
+                with st.spinner("Generating answer..."):
+                    try:
+                        client = api_client()
+                        ask_resp = client.post(
+                            "/ask",
+                            json={
+                                "query": query,
+                                "top_k": min(top_k, 10),
+                                "min_score": min_score,
+                                "filter_file_id": filter_file_id,
+                            },
+                        )
+                        if ask_resp.status_code == 200:
+                            st.session_state["ask_result"] = ask_resp.json()
+                            st.session_state.pop("search_results", None)
+                        elif ask_resp.status_code == 503:
+                            st.warning(
+                                "Answer generation is not configured. "
+                                "Set GENERATION_API_URL and GENERATION_MODEL to enable."
+                            )
+                        else:
+                            st.error(
+                                ask_resp.json().get("detail", "Ask failed")
+                            )
+                    except httpx.HTTPError as e:
+                        st.error(str(e))
+
+        # Display search results
+        if "search_results" in st.session_state:
+            search_results = st.session_state["search_results"]
+            if search_results:
+                st.subheader("Search Results")
+                for rank, sr in enumerate(search_results, start=1):
+                    j = job_lookup.get(sr["file_id"])
+                    if j:
+                        col_rank, col_name, col_page, col_score = st.columns(
+                            [0.5, 3, 1.5, 1]
+                        )
+                        col_rank.write(f"**{rank}**")
+                        col_name.write(j["file_stem"])
+                        col_page.write(f"Page {sr['page_index'] + 1}")
+                        col_score.write(f"{sr['score']:.4f}")
+            else:
+                st.info("No results above the score threshold.")
+
+        # Display ask result
+        if "ask_result" in st.session_state:
+            ask_result = st.session_state["ask_result"]
+            st.subheader("Answer")
+            with st.container(border=True):
+                st.markdown(ask_result["answer"])
+                if ask_result["sources"]:
+                    st.divider()
+                    st.caption("Sources:")
+                    for sr in ask_result["sources"]:
+                        j = job_lookup.get(sr["file_id"])
+                        if j:
+                            st.caption(
+                                f"{j['file_stem']} \u00b7 "
+                                f"Page {sr['page_index'] + 1} \u00b7 "
+                                f"{sr['score']:.4f}"
+                            )
+```
+
+- [ ] **Step 2: Remove the unused `timedelta` import if not used elsewhere**
+
+Check: the `timedelta` import is used in Task 3 for `@st.fragment(run_every=timedelta(seconds=5))`. If it is present, keep it. If Task 3 used a plain integer instead, remove the import.
+
+- [ ] **Step 3: Verify syntax**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run python -c "import ast; ast.parse(open('streamlit_app.py').read()); print('Syntax OK')"`
+
+Expected: `Syntax OK`
+
+- [ ] **Step 4: Lint and format**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run ruff check streamlit_app.py && uv run ruff format --check streamlit_app.py`
+
+Fix any issues if needed.
+
+- [ ] **Step 5: Run existing tests**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run pytest -x -q`
+
+Expected: All tests pass.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline"
+git add streamlit_app.py
+git commit -m "feat: implement Query tab with combined search/ask, spinners, tooltips"
+```
+
+---
+
+### Task 5: Final Verification and CLAUDE.md Update
+
+**Files:**
+- Modify: `CLAUDE.md` (update the Streamlit UI section if any architecture notes changed)
+
+- [ ] **Step 1: Full lint and format pass**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run ruff check . && uv run ruff format .`
+
+- [ ] **Step 2: Run full test suite**
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && uv run pytest -v`
+
+Expected: All tests pass.
+
+- [ ] **Step 3: Verify `streamlit_app.py` has no remaining placeholders**
+
+Search the file for "coming" or "placeholder" to ensure no stub text remains.
+
+Run: `cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline" && grep -in "coming\|placeholder" streamlit_app.py || echo "No placeholders found"`
+
+Expected: `No placeholders found`
+
+- [ ] **Step 4: Update CLAUDE.md if needed**
+
+Review the Streamlit section of `CLAUDE.md`. The UI description may reference the old layout (single scroll, separate Search and Ask sections). Update to reflect:
+- Tabs layout (Upload, Jobs, Query)
+- Sidebar for health/device info
+- Auto-refresh via `@st.fragment`
+- Combined Search + Ask in Query tab
+- `pandas` added as a dependency
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd "/Users/daryl-lim/Library/Mobile Documents/com~apple~CloudDocs/GitHub/granite-vision-embedding-pipeline"
+git add streamlit_app.py CLAUDE.md
+git commit -m "docs: update CLAUDE.md for new Streamlit UI layout"
+```
