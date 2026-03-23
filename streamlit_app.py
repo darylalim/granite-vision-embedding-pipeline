@@ -57,13 +57,16 @@ if uploaded_files:
 
         if job_ids:
             total = len(job_ids)
+            max_polls = 150  # 5 minutes at 2-second intervals
             with st.status(f"Processing {total} job(s)...", expanded=True) as status:
                 progress_bar = st.progress(0)
                 progress_text = st.empty()
-                while True:
-                    completed = 0
-                    failed = 0
-                    with api_client() as client:
+                polls = 0
+                timed_out = False
+                with api_client() as client:
+                    while True:
+                        completed = 0
+                        failed = 0
                         for jid in job_ids:
                             try:
                                 resp = client.get(f"/jobs/{jid}")
@@ -75,17 +78,25 @@ if uploaded_files:
                                         failed += 1
                             except httpx.HTTPError:
                                 pass
-                    done = completed + failed
-                    progress_bar.progress(done / total)
-                    if failed:
-                        progress_text.text(f"{done}/{total} done — {failed} failed")
-                    else:
-                        progress_text.text(f"{done}/{total} completed")
-                    if done >= total:
-                        break
-                    time.sleep(2)
+                        done = completed + failed
+                        progress_bar.progress(done / total)
+                        if failed:
+                            progress_text.text(f"{done}/{total} done — {failed} failed")
+                        else:
+                            progress_text.text(f"{done}/{total} completed")
+                        if done >= total:
+                            break
+                        polls += 1
+                        if polls >= max_polls:
+                            timed_out = True
+                            break
+                        time.sleep(2)
 
-                if failed:
+                if timed_out:
+                    status.update(
+                        label="Polling timed out — check job dashboard", state="error"
+                    )
+                elif failed:
                     status.update(label="Jobs finished with errors", state="error")
                 else:
                     status.update(label="All jobs completed", state="complete")
@@ -97,15 +108,31 @@ st.subheader("Jobs")
 col_refresh, col_delete_all, col_filter = st.columns([1, 1, 2])
 if col_refresh.button("Refresh"):
     st.rerun()
-if col_delete_all.button("Delete All"):
-    try:
-        with api_client() as client:
-            client.delete("/jobs")
-        st.session_state.pop("search_results", None)
-        st.session_state.pop("ask_result", None)
+
+
+@st.dialog("Confirm Delete All")
+def confirm_delete_all():
+    st.write(
+        "This will delete all jobs and their files. Jobs currently processing will be kept."
+    )
+    col_yes, col_no = st.columns(2)
+    if col_yes.button("Delete", type="primary", key="confirm_delete"):
+        try:
+            with api_client() as client:
+                resp = client.delete("/jobs")
+                count = resp.json().get("deleted", 0)
+            st.session_state.pop("search_results", None)
+            st.session_state.pop("ask_result", None)
+            st.toast(f"Deleted {count} job(s).")
+            st.rerun()
+        except httpx.HTTPError as e:
+            st.error(str(e))
+    if col_no.button("Cancel", key="cancel_delete"):
         st.rerun()
-    except httpx.HTTPError as e:
-        st.error(str(e))
+
+
+if col_delete_all.button("Delete All"):
+    confirm_delete_all()
 
 status_filter = col_filter.selectbox(
     "Status filter",
