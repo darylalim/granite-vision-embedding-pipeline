@@ -104,7 +104,7 @@ Pure logic with no Streamlit or FastAPI dependencies:
 
 ### Pipeline
 
-Upload files → API saves to `uploads/` and creates SQLite job → worker picks up pending jobs (FIFO) → renders PDF pages or loads images → embeds with model → saves JSON + `.pt` to `results/` → marks completed → Streamlit polls for status
+Upload files → API saves to `uploads/` and creates SQLite job → worker picks up pending jobs (FIFO) → renders PDF pages or loads images → embeds with model → saves JSON + `.pt` to `results/` → marks completed → Streamlit polls for status via progress bar and auto-refreshes on completion
 
 ### Answer Generation
 

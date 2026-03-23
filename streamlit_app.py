@@ -1,4 +1,5 @@
 import os
+import time
 
 import httpx
 import streamlit as st
@@ -32,6 +33,8 @@ if uploaded_files:
     st.caption(f"{len(uploaded_files)} file(s) · {total_size_mb:.1f} MB")
 
     if st.button("Submit Jobs", type="primary"):
+        job_ids: list[str] = []
+        submit_errors: list[str] = []
         with api_client() as client:
             for f in uploaded_files:
                 try:
@@ -41,13 +44,52 @@ if uploaded_files:
                         data={"dpi": str(dpi)},
                     )
                     if resp.status_code == 201:
-                        st.success(f"Submitted: {f.name}")
+                        job_ids.append(resp.json()["job_id"])
                     else:
-                        st.error(
+                        submit_errors.append(
                             f"{f.name}: {resp.json().get('detail', 'Unknown error')}"
                         )
                 except httpx.HTTPError as e:
-                    st.error(f"{f.name}: {e}")
+                    submit_errors.append(f"{f.name}: {e}")
+
+        for err in submit_errors:
+            st.error(err)
+
+        if job_ids:
+            total = len(job_ids)
+            with st.status(f"Processing {total} job(s)...", expanded=True) as status:
+                progress_bar = st.progress(0)
+                progress_text = st.empty()
+                while True:
+                    completed = 0
+                    failed = 0
+                    with api_client() as client:
+                        for jid in job_ids:
+                            try:
+                                resp = client.get(f"/jobs/{jid}")
+                                if resp.status_code == 200:
+                                    s = resp.json()["status"]
+                                    if s == "completed":
+                                        completed += 1
+                                    elif s == "failed":
+                                        failed += 1
+                            except httpx.HTTPError:
+                                pass
+                    done = completed + failed
+                    progress_bar.progress(done / total)
+                    if failed:
+                        progress_text.text(f"{done}/{total} done — {failed} failed")
+                    else:
+                        progress_text.text(f"{done}/{total} completed")
+                    if done >= total:
+                        break
+                    time.sleep(2)
+
+                if failed:
+                    status.update(label="Jobs finished with errors", state="error")
+                else:
+                    status.update(label="All jobs completed", state="complete")
+            st.rerun()
 
 # Job Dashboard
 st.subheader("Jobs")
