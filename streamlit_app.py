@@ -153,7 +153,8 @@ with tab_upload:
                     st.toast(f"Completed {total} job(s).")
 
         st.session_state["uploading"] = False
-        st.rerun()
+        if job_ids:
+            st.rerun()
 
 with tab_jobs:
     st.info("Jobs tab — coming soon.")
