@@ -68,6 +68,10 @@ tests/
   test_streamlit_app.py   Streamlit UI tests (AppTest integration)
 ```
 
+## Key Dependencies
+
+FastAPI, Streamlit, PyTorch, Transformers, PyMuPDF, httpx, pandas, SQLite (via stdlib)
+
 ## Configuration
 
 | Variable | Default | Description |

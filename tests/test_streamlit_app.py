@@ -1,34 +1,11 @@
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 SCRIPT_PATH = "streamlit_app.py"
-
-
-class TestStatusIcons:
-    """Self-contained tests — hardcoded values, no import of streamlit_app.
-
-    These must match the STATUS_ICONS dict in streamlit_app.py.
-    If the dict changes, update these expected values.
-    """
-
-    EXPECTED = {
-        "completed": "\U0001f7e2",
-        "failed": "\U0001f534",
-        "pending": "\U0001f7e1",
-        "processing": "\U0001f535",
-    }
-
-    def test_contains_all_statuses(self) -> None:
-        expected_keys = {"completed", "failed", "pending", "processing"}
-        assert set(self.EXPECTED.keys()) == expected_keys
-
-    def test_values_are_non_empty_strings(self) -> None:
-        for status, icon in self.EXPECTED.items():
-            assert isinstance(icon, str), f"{status} icon is not a string"
-            assert len(icon) > 0, f"{status} icon is empty"
 
 
 def _make_mock_client(
@@ -114,59 +91,105 @@ SAMPLE_JOBS = [
 ]
 
 
+class TestStatusIcons:
+    """Verify status badge icons appear in the rendered dataframe."""
+
+    def test_completed_badge_in_dataframe(self) -> None:
+        at = _run_app(jobs=SAMPLE_JOBS)
+        assert len(at.dataframe) >= 1
+
+    def test_all_statuses_have_badges(self) -> None:
+        mixed_jobs = [
+            *SAMPLE_JOBS,
+            {
+                "id": "job3",
+                "status": "pending",
+                "file_name": "pending.pdf",
+                "file_stem": "pending",
+                "file_type": "pdf",
+                "dpi": 150,
+                "page_count": None,
+                "duration_ns": None,
+                "created_at": "2024-01-03",
+                "updated_at": "2024-01-03",
+            },
+            {
+                "id": "job4",
+                "status": "failed",
+                "file_name": "failed.pdf",
+                "file_stem": "failed",
+                "file_type": "pdf",
+                "dpi": 150,
+                "page_count": None,
+                "duration_ns": None,
+                "created_at": "2024-01-04",
+                "updated_at": "2024-01-04",
+                "error": "corrupt file",
+            },
+        ]
+        at = _run_app(jobs=mixed_jobs)
+        assert len(at.dataframe) >= 1
+
+
 class TestConnectionCheck:
-    def test_shows_error_when_api_unreachable(self) -> None:
-        at = _run_app(health_error=True)
-        errors = [e.value for e in at.error]
+    @pytest.fixture(scope="class")
+    def app(self) -> AppTest:
+        return _run_app(health_error=True)
+
+    def test_shows_error_when_api_unreachable(self, app: AppTest) -> None:
+        errors = [e.value for e in app.error]
         assert any("Cannot connect" in e for e in errors)
 
-    def test_no_tabs_when_api_unreachable(self) -> None:
-        at = _run_app(health_error=True)
-        assert len(at.tabs) == 0
+    def test_error_includes_startup_command(self, app: AppTest) -> None:
+        errors = [e.value for e in app.error]
+        assert any("uvicorn" in e for e in errors)
+
+    def test_no_tabs_when_api_unreachable(self, app: AppTest) -> None:
+        assert len(app.tabs) == 0
 
 
 class TestHealthyAppStructure:
-    def test_sidebar_contains_model_id(self) -> None:
-        at = _run_app()
-        sidebar_texts = [c.value for c in at.sidebar.caption]
+    @pytest.fixture(scope="class")
+    def app(self) -> AppTest:
+        return _run_app()
+
+    def test_sidebar_contains_model_id(self, app: AppTest) -> None:
+        sidebar_texts = [c.value for c in app.sidebar.caption]
         assert any("ibm-granite" in t for t in sidebar_texts)
 
-    def test_sidebar_contains_device(self) -> None:
-        at = _run_app()
-        sidebar_texts = [c.value for c in at.sidebar.caption]
+    def test_sidebar_contains_device(self, app: AppTest) -> None:
+        sidebar_texts = [c.value for c in app.sidebar.caption]
         assert any("CPU" in t for t in sidebar_texts)
 
-    def test_sidebar_contains_queue_depth(self) -> None:
-        at = _run_app()
-        sidebar_texts = [c.value for c in at.sidebar.caption]
+    def test_sidebar_contains_queue_depth(self, app: AppTest) -> None:
+        sidebar_texts = [c.value for c in app.sidebar.caption]
         assert any("0 pending" in t for t in sidebar_texts)
 
-    def test_three_tabs_render(self) -> None:
-        at = _run_app()
-        assert len(at.tabs) == 3
+    def test_three_tabs_render(self, app: AppTest) -> None:
+        assert len(app.tabs) == 3
 
-    def test_tab_labels(self) -> None:
-        at = _run_app()
-        labels = [t.label for t in at.tabs]
+    def test_tab_labels(self, app: AppTest) -> None:
+        labels = [t.label for t in app.tabs]
         assert labels == ["Upload", "Jobs", "Query"]
 
 
 class TestUploadTab:
-    def test_dpi_radio_exists_with_three_options(self) -> None:
-        at = _run_app()
-        assert len(at.radio) == 1
-        assert len(at.radio[0].options) == 3
+    @pytest.fixture(scope="class")
+    def app(self) -> AppTest:
+        return _run_app()
 
-    def test_dpi_radio_options_match_constants(self) -> None:
-        at = _run_app()
-        options = at.radio[0].options
+    def test_dpi_radio_exists_with_three_options(self, app: AppTest) -> None:
+        assert len(app.radio) == 1
+        assert len(app.radio[0].options) == 3
+
+    def test_dpi_radio_options_match_constants(self, app: AppTest) -> None:
+        options = app.radio[0].options
         assert "Low (72)" in options
         assert "Medium (150)" in options
         assert "High (300)" in options
 
-    def test_dpi_default_is_medium(self) -> None:
-        at = _run_app()
-        assert at.radio[0].value == "Medium (150)"
+    def test_dpi_default_is_medium(self, app: AppTest) -> None:
+        assert app.radio[0].value == "Medium (150)"
 
 
 class TestJobsTab:

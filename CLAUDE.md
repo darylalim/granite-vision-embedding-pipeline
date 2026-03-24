@@ -78,8 +78,19 @@ Streamlit UI  →  FastAPI Backend  →  Embedding Worker (background thread)
 
 ### Entry Points
 
-- `streamlit_app.py` — Streamlit UI with tabbed layout (Upload, Jobs, Query), sidebar health, auto-refresh via `@st.fragment`
+- `streamlit_app.py` — Streamlit UI (thin API client)
 - `api/app.py` — FastAPI backend (`create_app()` factory)
+
+### Streamlit UI (`streamlit_app.py`)
+
+Tabbed layout with three tabs (Upload, Jobs, Query) and a sidebar:
+
+- **Connection check** — calls `GET /health` on load; shows `st.error` + `st.stop()` if unreachable (`ConnectError` vs general `HTTPError` handled separately)
+- **Sidebar** — model ID, device, queue depth via `st.sidebar.caption`
+- **Upload tab** — file uploader, DPI radio in expander, polling loop with progress bar, toast on success
+- **Jobs tab** — `@st.fragment(run_every=5s)` auto-refreshes metrics + dataframe; status filter and Delete All outside the fragment; row selection persisted in `st.session_state["selected_job_id"]`; detail panel with download/delete outside the fragment; deferred Download All (two-step: prepare then download)
+- **Query tab** — combined Search + Ask with shared controls; `document_filter()` selectbox, advanced options expander (Top-K, Min Score with help tooltips), `st.spinner` wrapping API calls; Ask caps `top_k` at 10 with user-visible caption
+- **Session state keys** — `uploading`, `selected_job_id`, `search_results`, `ask_result`, `download_all_json`, `query_input`
 
 ### Core Module (`core/`)
 
@@ -129,8 +140,9 @@ Upload files → API saves to `uploads/` and creates SQLite job → worker picks
 - SQLite WAL mode + busy_timeout for concurrent access
 - Composite index on `(status, created_at)` for job queries
 - Cached `httpx.Client` via `@st.cache_resource` in Streamlit (single connection pool)
-- Auto-refreshing job list via `@st.fragment(run_every=5s)` in Streamlit Jobs tab
-- Batch job status polling (one `GET /jobs` per cycle instead of per-job requests)
+- Auto-refreshing job list via `@st.fragment(run_every=5s)` in Jobs tab (metrics + dataframe only)
+- Batch job status polling in Upload tab (one `GET /jobs` per poll cycle instead of per-job requests)
+- Deferred Download All (two-step: prepare button fetches payloads, then download button serves cached data)
 - PDF byte and job lookup caching per document in `/ask` to avoid duplicate reads
 
 ### Constants

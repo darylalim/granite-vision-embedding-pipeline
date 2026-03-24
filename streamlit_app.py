@@ -66,11 +66,14 @@ st.title("Granite Vision Embedding Pipeline")
 # --- Connection Check ---
 try:
     _health = api_client().get("/health").json()
-except httpx.HTTPError:
+except httpx.ConnectError:
     st.error(
         "Cannot connect to API server. "
         "Start it with: `uv run uvicorn api.app:create_app --factory --port 8000`"
     )
+    st.stop()
+except httpx.HTTPError:
+    st.error("API server error. Check the server logs.")
     st.stop()
 
 # --- Sidebar ---
@@ -245,7 +248,7 @@ with tab_jobs:
 
         event = st.dataframe(
             display_df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             selection_mode="single-row",
             on_select="rerun",
@@ -262,7 +265,7 @@ with tab_jobs:
 
     jobs_fragment()
 
-    # --- Download All (outside fragment, fetches only on full rerun) ---
+    # --- Download All (deferred fetch — only loads payloads on click) ---
     try:
         client = api_client()
         completed_resp = client.get("/jobs", params={"status": "completed"})
@@ -273,19 +276,24 @@ with tab_jobs:
         all_completed = []
 
     if len(all_completed) > 1:
-        all_results = []
-        for j in all_completed:
-            try:
-                result_resp = client.get(f"/jobs/{j['id']}/result")
-                if result_resp.status_code == 200:
-                    all_results.append(result_resp.text)
-            except httpx.HTTPError:
-                pass
-        if all_results:
-            all_json = "[" + ",".join(all_results) + "]"
+        if st.button("Prepare Download All", key="prepare_download_all"):
+            all_results = []
+            for j in all_completed:
+                try:
+                    result_resp = client.get(f"/jobs/{j['id']}/result")
+                    if result_resp.status_code == 200:
+                        all_results.append(result_resp.text)
+                except httpx.HTTPError:
+                    pass
+            if all_results:
+                st.session_state["download_all_json"] = (
+                    "[" + ",".join(all_results) + "]"
+                )
+
+        if "download_all_json" in st.session_state:
             st.download_button(
                 "Download All JSON",
-                data=all_json,
+                data=st.session_state["download_all_json"],
                 file_name="all_embeddings.json",
                 mime="application/json",
                 key="download_all",
@@ -393,7 +401,6 @@ with tab_query:
             else:
                 with st.spinner("Searching..."):
                     try:
-                        client = api_client()
                         search_resp = client.post(
                             "/search",
                             json={
@@ -417,14 +424,18 @@ with tab_query:
             if not query:
                 st.warning("Enter a question.")
             else:
+                ask_top_k = min(top_k, 10)
+                if top_k > 10:
+                    st.caption(
+                        f"Top K capped at 10 for answer generation (was {top_k})."
+                    )
                 with st.spinner("Generating answer..."):
                     try:
-                        client = api_client()
                         ask_resp = client.post(
                             "/ask",
                             json={
                                 "query": query,
-                                "top_k": min(top_k, 10),
+                                "top_k": ask_top_k,
                                 "min_score": min_score,
                                 "filter_file_id": filter_file_id,
                             },
