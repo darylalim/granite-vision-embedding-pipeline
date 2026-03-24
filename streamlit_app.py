@@ -449,14 +449,14 @@ with tab_query:
                 st.subheader("Search Results")
                 for rank, sr in enumerate(search_results, start=1):
                     j = job_lookup.get(sr["file_id"])
-                    if j:
-                        col_rank, col_name, col_page, col_score = st.columns(
-                            [0.5, 3, 1.5, 1]
-                        )
-                        col_rank.write(f"**{rank}**")
-                        col_name.write(j["file_stem"])
-                        col_page.write(f"Page {sr['page_index'] + 1}")
-                        col_score.write(f"{sr['score']:.4f}")
+                    label = j["file_stem"] if j else sr["file_id"]
+                    col_rank, col_name, col_page, col_score = st.columns(
+                        [0.5, 3, 1.5, 1]
+                    )
+                    col_rank.write(f"**{rank}**")
+                    col_name.write(label)
+                    col_page.write(f"Page {sr['page_index'] + 1}")
+                    col_score.write(f"{sr['score']:.4f}")
             else:
                 st.info("No results above the score threshold.")
 
@@ -471,9 +471,9 @@ with tab_query:
                     st.caption("Sources:")
                     for sr in ask_result["sources"]:
                         j = job_lookup.get(sr["file_id"])
-                        if j:
-                            st.caption(
-                                f"{j['file_stem']} \u00b7 "
-                                f"Page {sr['page_index'] + 1} \u00b7 "
-                                f"{sr['score']:.4f}"
-                            )
+                        label = j["file_stem"] if j else sr["file_id"]
+                        st.caption(
+                            f"{label} \u00b7 "
+                            f"Page {sr['page_index'] + 1} \u00b7 "
+                            f"{sr['score']:.4f}"
+                        )
