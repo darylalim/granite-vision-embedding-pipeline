@@ -16,5 +16,6 @@ uploads/
 results/
 data/
 
-# Historical plans
+# Generated docs
 docs/plans/
+docs/superpowers/

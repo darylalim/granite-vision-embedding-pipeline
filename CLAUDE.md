@@ -78,7 +78,7 @@ Streamlit UI  →  FastAPI Backend  →  Embedding Worker (background thread)
 
 ### Entry Points
 
-- `streamlit_app.py` — Streamlit UI with tabbed layout (Upload, Jobs, Query), sidebar health, auto-refresh job list via `@st.fragment`
+- `streamlit_app.py` — Streamlit UI with tabbed layout (Upload, Jobs, Query), sidebar health, auto-refresh via `@st.fragment`
 - `api/app.py` — FastAPI backend (`create_app()` factory)
 
 ### Core Module (`core/`)

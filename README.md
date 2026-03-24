@@ -4,6 +4,7 @@ Streamlit + FastAPI app for generating vector embeddings from PDF documents and 
 
 ## Features
 
+- Tabbed UI (Upload, Jobs, Query) with sidebar health info and connection check
 - Upload PDFs and images (PNG, JPG, JPEG, WebP) in bulk
 - PDF page rendering at configurable DPI (72, 150, 300) via [PyMuPDF](https://pymupdf.readthedocs.io/)
 - Multi-vector embeddings with [Granite Vision 3.3 2B Embedding](https://huggingface.co/ibm-granite/granite-vision-3.3-2b-embedding)
@@ -11,9 +12,9 @@ Streamlit + FastAPI app for generating vector embeddings from PDF documents and 
 - Cross-document text search with top-K and score threshold filtering
 - RAG answer generation via external OpenAI-compatible VLM (OpenAI, Ollama, vLLM, etc.)
 - Per-document and combined JSON embedding downloads
-- Real-time progress bar with auto-refresh on job completion
+- Auto-refreshing job dashboard with dataframe, status badges, and detail panel
+- Combined Search + Ask query tab with spinners and help tooltips
 - Automatic device selection (MPS > CUDA > CPU)
-- Job dashboard with status tracking, filtering, bulk delete, and per-job deletion
 
 ## Setup
 
@@ -43,7 +44,7 @@ uv run pytest         # test
 ## Architecture
 
 ```
-streamlit_app.py          Streamlit UI (cached httpx client, batch polling)
+streamlit_app.py          Streamlit UI (tabs, sidebar, auto-refresh via @st.fragment)
 api/
   app.py                  FastAPI routes, _cleanup_job_files(), _run_search()
   models.py               Pydantic request/response schemas
@@ -64,6 +65,7 @@ tests/
   test_database.py        SQLite job management tests
   test_worker.py          Worker thread tests
   test_api.py             API helper and route tests
+  test_streamlit_app.py   Streamlit UI tests (AppTest integration)
 ```
 
 ## Configuration
