@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import httpx
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 SCRIPT_PATH = "streamlit_app.py"
@@ -77,6 +78,7 @@ def _make_mock_client(
 
 def _run_app(**kwargs) -> AppTest:
     """Create and run AppTest with a mocked httpx.Client."""
+    st.cache_resource.clear()
     mock_client = _make_mock_client(**kwargs)
     with patch("httpx.Client", return_value=mock_client):
         at = AppTest.from_file(SCRIPT_PATH, default_timeout=10)
@@ -110,3 +112,107 @@ SAMPLE_JOBS = [
         "updated_at": "2024-01-02",
     },
 ]
+
+
+class TestConnectionCheck:
+    def test_shows_error_when_api_unreachable(self) -> None:
+        at = _run_app(health_error=True)
+        errors = [e.value for e in at.error]
+        assert any("Cannot connect" in e for e in errors)
+
+    def test_no_tabs_when_api_unreachable(self) -> None:
+        at = _run_app(health_error=True)
+        assert len(at.tabs) == 0
+
+
+class TestHealthyAppStructure:
+    def test_sidebar_contains_model_id(self) -> None:
+        at = _run_app()
+        sidebar_texts = [c.value for c in at.sidebar.caption]
+        assert any("ibm-granite" in t for t in sidebar_texts)
+
+    def test_sidebar_contains_device(self) -> None:
+        at = _run_app()
+        sidebar_texts = [c.value for c in at.sidebar.caption]
+        assert any("CPU" in t for t in sidebar_texts)
+
+    def test_sidebar_contains_queue_depth(self) -> None:
+        at = _run_app()
+        sidebar_texts = [c.value for c in at.sidebar.caption]
+        assert any("0 pending" in t for t in sidebar_texts)
+
+    def test_three_tabs_render(self) -> None:
+        at = _run_app()
+        assert len(at.tabs) == 3
+
+    def test_tab_labels(self) -> None:
+        at = _run_app()
+        labels = [t.label for t in at.tabs]
+        assert labels == ["Upload", "Jobs", "Query"]
+
+
+class TestUploadTab:
+    def test_dpi_radio_exists_with_three_options(self) -> None:
+        at = _run_app()
+        assert len(at.radio) == 1
+        assert len(at.radio[0].options) == 3
+
+    def test_dpi_radio_options_match_constants(self) -> None:
+        at = _run_app()
+        options = at.radio[0].options
+        assert "Low (72)" in options
+        assert "Medium (150)" in options
+        assert "High (300)" in options
+
+    def test_dpi_default_is_medium(self) -> None:
+        at = _run_app()
+        assert at.radio[0].value == "Medium (150)"
+
+
+class TestJobsTab:
+    def test_no_jobs_shows_info(self) -> None:
+        at = _run_app()
+        info_texts = [i.value for i in at.info]
+        assert any("No jobs found" in t for t in info_texts)
+
+    def test_status_filter_selectbox_exists(self) -> None:
+        at = _run_app()
+        status_sb = [sb for sb in at.selectbox if sb.label == "Status filter"]
+        assert len(status_sb) == 1
+        assert "all" in status_sb[0].options
+        assert "completed" in status_sb[0].options
+
+    def test_dataframe_renders_with_jobs(self) -> None:
+        at = _run_app(jobs=SAMPLE_JOBS)
+        assert len(at.dataframe) >= 1
+
+    def test_metrics_render_with_completed_jobs(self) -> None:
+        at = _run_app(jobs=SAMPLE_JOBS)
+        assert len(at.metric) >= 3
+
+
+class TestQueryTab:
+    def test_no_completed_jobs_shows_info(self) -> None:
+        at = _run_app()
+        info_texts = [i.value for i in at.info]
+        assert any("No documents available" in t for t in info_texts)
+
+    def test_document_filter_renders_with_completed_jobs(self) -> None:
+        at = _run_app(jobs=SAMPLE_JOBS)
+        doc_sb = [sb for sb in at.selectbox if sb.label == "Document filter"]
+        assert len(doc_sb) == 1
+        assert "All documents" in doc_sb[0].options
+        assert "test" in doc_sb[0].options
+        assert "doc" in doc_sb[0].options
+
+    def test_query_input_renders_with_completed_jobs(self) -> None:
+        at = _run_app(jobs=SAMPLE_JOBS)
+        assert len(at.text_input) >= 1
+        query_inputs = [ti for ti in at.text_input if ti.label == "Query"]
+        assert len(query_inputs) == 1
+
+    def test_search_and_ask_buttons_render(self) -> None:
+        at = _run_app(jobs=SAMPLE_JOBS)
+        button_labels = [b.label for b in at.button]
+        assert "Search" in button_labels
+        assert "Ask" in button_labels
