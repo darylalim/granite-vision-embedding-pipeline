@@ -197,6 +197,7 @@ Fields per document:
 - `tests/test_database.py` — SQLite job management: `TestInitDb`, `TestCreateJob`, `TestGetJob`, `TestListJobs`, `TestUpdateJob`, `TestDeleteJob`, `TestDeleteAllJobs`, `TestResetProcessingJobs`, `TestNextPendingJob`
 - `tests/test_worker.py` — embedding worker: `TestProcessJob`, `TestStartupRecovery`, `TestTensorCache`, `TestSearchDispatch`
 - `tests/test_api.py` — API helpers and routes: `TestCleanupJobFiles`, `TestHealth`, `TestUploadJob`, `TestListJobs`, `TestGetJob`, `TestDeleteJob`, `TestDeleteAllJobs`, `TestGetResult`, `TestSearch`, `TestAsk`
+- `tests/test_streamlit_app.py` — Streamlit UI: `TestStatusIcons`, `TestConnectionCheck`, `TestHealthyAppStructure`, `TestUploadTab`, `TestJobsTab`, `TestQueryTab`
 - `tests/data/pdf/single_page.pdf` — single-page PDF fixture
 - `tests/data/pdf/multi_page.pdf` — multi-page PDF fixture (3 pages)
 - `tests/data/images/red.png` — PNG image fixture
