@@ -347,4 +347,133 @@ with tab_jobs:
             st.session_state.pop("selected_job_id", None)
 
 with tab_query:
-    st.info("Query tab — coming soon.")
+    # Check for completed jobs
+    try:
+        client = api_client()
+        completed_resp = client.get("/jobs", params={"status": "completed"})
+        completed_jobs = (
+            completed_resp.json() if completed_resp.status_code == 200 else []
+        )
+    except httpx.HTTPError:
+        completed_jobs = []
+
+    if not completed_jobs:
+        st.info("No documents available \u2014 upload and process files first.")
+    else:
+        job_lookup = {j["id"]: j for j in completed_jobs}
+
+        filter_file_id = document_filter(completed_jobs)
+
+        with st.expander("Advanced options"):
+            col_topk, col_minscore = st.columns(2)
+            top_k = col_topk.number_input(
+                "Top K",
+                min_value=1,
+                max_value=100,
+                value=5,
+                help="Number of results to return",
+            )
+            min_score = col_minscore.number_input(
+                "Min score",
+                min_value=0.0,
+                value=0.0,
+                step=0.1,
+                help="Filter out low-confidence results",
+            )
+
+        query = st.text_input("Query", key="query_input")
+
+        col_search, col_ask = st.columns(2)
+        search_clicked = col_search.button("Search", type="primary")
+        ask_clicked = col_ask.button("Ask")
+
+        if search_clicked:
+            if not query:
+                st.warning("Enter a query.")
+            else:
+                with st.spinner("Searching..."):
+                    try:
+                        client = api_client()
+                        search_resp = client.post(
+                            "/search",
+                            json={
+                                "query": query,
+                                "top_k": top_k,
+                                "min_score": min_score,
+                                "filter_file_id": filter_file_id,
+                            },
+                        )
+                        if search_resp.status_code == 200:
+                            st.session_state["search_results"] = search_resp.json()[
+                                "results"
+                            ]
+                            st.session_state.pop("ask_result", None)
+                        else:
+                            st.error(search_resp.json().get("detail", "Search failed"))
+                    except httpx.HTTPError as e:
+                        st.error(str(e))
+
+        if ask_clicked:
+            if not query:
+                st.warning("Enter a question.")
+            else:
+                with st.spinner("Generating answer..."):
+                    try:
+                        client = api_client()
+                        ask_resp = client.post(
+                            "/ask",
+                            json={
+                                "query": query,
+                                "top_k": min(top_k, 10),
+                                "min_score": min_score,
+                                "filter_file_id": filter_file_id,
+                            },
+                        )
+                        if ask_resp.status_code == 200:
+                            st.session_state["ask_result"] = ask_resp.json()
+                            st.session_state.pop("search_results", None)
+                        elif ask_resp.status_code == 503:
+                            st.warning(
+                                "Answer generation is not configured. "
+                                "Set GENERATION_API_URL and GENERATION_MODEL to enable."
+                            )
+                        else:
+                            st.error(ask_resp.json().get("detail", "Ask failed"))
+                    except httpx.HTTPError as e:
+                        st.error(str(e))
+
+        # Display search results
+        if "search_results" in st.session_state:
+            search_results = st.session_state["search_results"]
+            if search_results:
+                st.subheader("Search Results")
+                for rank, sr in enumerate(search_results, start=1):
+                    j = job_lookup.get(sr["file_id"])
+                    if j:
+                        col_rank, col_name, col_page, col_score = st.columns(
+                            [0.5, 3, 1.5, 1]
+                        )
+                        col_rank.write(f"**{rank}**")
+                        col_name.write(j["file_stem"])
+                        col_page.write(f"Page {sr['page_index'] + 1}")
+                        col_score.write(f"{sr['score']:.4f}")
+            else:
+                st.info("No results above the score threshold.")
+
+        # Display ask result
+        if "ask_result" in st.session_state:
+            ask_result = st.session_state["ask_result"]
+            st.subheader("Answer")
+            with st.container(border=True):
+                st.markdown(ask_result["answer"])
+                if ask_result["sources"]:
+                    st.divider()
+                    st.caption("Sources:")
+                    for sr in ask_result["sources"]:
+                        j = job_lookup.get(sr["file_id"])
+                        if j:
+                            st.caption(
+                                f"{j['file_stem']} \u00b7 "
+                                f"Page {sr['page_index'] + 1} \u00b7 "
+                                f"{sr['score']:.4f}"
+                            )
