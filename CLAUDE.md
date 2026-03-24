@@ -42,6 +42,7 @@ uv run streamlit run streamlit_app.py
 - `torch` — tensor operations
 - `torchvision` — required by Granite model remote code
 - `streamlit` — web user interface
+- `pandas` — dataframe for job table display
 - `ruff` — linting/formatting (dev)
 - `ty` — type checking (dev)
 - `pytest` — testing (dev)
@@ -77,7 +78,7 @@ Streamlit UI  →  FastAPI Backend  →  Embedding Worker (background thread)
 
 ### Entry Points
 
-- `streamlit_app.py` — thin API client (Streamlit UI)
+- `streamlit_app.py` — Streamlit UI with tabbed layout (Upload, Jobs, Query), sidebar health, auto-refresh job list via `@st.fragment`
 - `api/app.py` — FastAPI backend (`create_app()` factory)
 
 ### Core Module (`core/`)
@@ -128,6 +129,7 @@ Upload files → API saves to `uploads/` and creates SQLite job → worker picks
 - SQLite WAL mode + busy_timeout for concurrent access
 - Composite index on `(status, created_at)` for job queries
 - Cached `httpx.Client` via `@st.cache_resource` in Streamlit (single connection pool)
+- Auto-refreshing job list via `@st.fragment(run_every=5s)` in Streamlit Jobs tab
 - Batch job status polling (one `GET /jobs` per cycle instead of per-job requests)
 - PDF byte and job lookup caching per document in `/ask` to avoid duplicate reads
 
