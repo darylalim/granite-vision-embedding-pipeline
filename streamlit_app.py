@@ -46,6 +46,7 @@ def confirm_delete_all():
         try:
             client = api_client()
             resp = client.delete("/jobs")
+            resp.raise_for_status()
             count = resp.json().get("deleted", 0)
             st.session_state.pop("search_results", None)
             st.session_state.pop("ask_result", None)
@@ -212,26 +213,6 @@ with tab_jobs:
             col2.metric("Pages", total_pages)
             col3.metric("Documents", len(all_completed))
 
-        # Download All
-        if len(all_completed) > 1:
-            all_results = []
-            for j in all_completed:
-                try:
-                    result_resp = client.get(f"/jobs/{j['id']}/result")
-                    if result_resp.status_code == 200:
-                        all_results.append(result_resp.text)
-                except httpx.HTTPError:
-                    pass
-            if all_results:
-                all_json = "[" + ",".join(all_results) + "]"
-                st.download_button(
-                    "Download All JSON",
-                    data=all_json,
-                    file_name="all_embeddings.json",
-                    mime="application/json",
-                    key="download_all",
-                )
-
         # Filtered job list for dataframe
         if status_filter == "all":
             filtered_jobs = all_jobs
@@ -281,6 +262,35 @@ with tab_jobs:
 
     jobs_fragment()
 
+    # --- Download All (outside fragment, fetches only on full rerun) ---
+    try:
+        client = api_client()
+        completed_resp = client.get("/jobs", params={"status": "completed"})
+        all_completed = (
+            completed_resp.json() if completed_resp.status_code == 200 else []
+        )
+    except httpx.HTTPError:
+        all_completed = []
+
+    if len(all_completed) > 1:
+        all_results = []
+        for j in all_completed:
+            try:
+                result_resp = client.get(f"/jobs/{j['id']}/result")
+                if result_resp.status_code == 200:
+                    all_results.append(result_resp.text)
+            except httpx.HTTPError:
+                pass
+        if all_results:
+            all_json = "[" + ",".join(all_results) + "]"
+            st.download_button(
+                "Download All JSON",
+                data=all_json,
+                file_name="all_embeddings.json",
+                mime="application/json",
+                key="download_all",
+            )
+
     # --- Detail Panel (outside fragment) ---
     selected_job_id = st.session_state.get("selected_job_id")
     if selected_job_id:
@@ -289,7 +299,7 @@ with tab_jobs:
             resp = client.get(f"/jobs/{selected_job_id}")
             if resp.status_code == 200:
                 job = resp.json()
-                st.subheader(f"{job['file_stem']}")
+                st.subheader(job["file_stem"])
                 st.caption(
                     f"Status: {job['status']} \u00b7 Type: {job['file_type']} "
                     f"\u00b7 DPI: {job['dpi']}"
@@ -321,7 +331,8 @@ with tab_jobs:
                 if job["status"] != "processing":
                     if col_del.button("Delete", key=f"del_{job['id']}"):
                         try:
-                            client.delete(f"/jobs/{job['id']}")
+                            resp = client.delete(f"/jobs/{job['id']}")
+                            resp.raise_for_status()
                             st.session_state.pop("selected_job_id", None)
                             st.session_state.pop("search_results", None)
                             st.session_state.pop("ask_result", None)
